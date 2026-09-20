@@ -429,6 +429,20 @@ function computerId(): string {
   return readOrMintComputerId(COMPUTER_ID_FILE, env.ADAPTER_COMPUTER_ID)
 }
 
+/**
+ * The identity an account-free daemon runs on: this computer's durable id and nothing signed. Only
+ * with HARNESS_LOCAL_ONLY, and only when no session file exists — a saved sign-in always wins, so the
+ * flag can never hide an account that is there. Never written to disk; `local` marks it in memory.
+ */
+function localOnlySession(): AuthSession {
+  return { version: 1, accessToken: '', autonomousEnv: 'prod', computerId: computerId(), updatedAt: Date.now(), local: true }
+}
+
+/** The session the daemon starts on: the saved sign-in, or the local identity when the flag allows one. */
+function daemonSession(): AuthSession | null {
+  return readAuthSession() ?? (env.HARNESS_LOCAL_ONLY ? localOnlySession() : null)
+}
+
 // ── login ──────────────────────────────────────────────────────────────────────────────────────
 // The REST base for control endpoints, derived from the WS URL (wss→https, ws→http).
 function backendHttpBase(): string {
@@ -532,6 +546,13 @@ async function resolveComputerMachine(signal?: AbortSignal): Promise<AuthSession
 async function authStatusCommand(json: boolean): Promise<void> {
   const session = readAuthSession()
   if (!session) {
+    // Local mode is an answer of its own, not "signed out": the daemon runs on this computer's id and
+    // the desktop app keeps its home screen instead of sending the person to a sign-in they declined.
+    if (env.HARNESS_LOCAL_ONLY) {
+      if (json) console.log(JSON.stringify({ loggedIn: false, localOnly: true, computerId: computerId() }))
+      else console.log('\n  ○ Local mode — this computer runs without an account. To reach other machines: harness login\n')
+      return
+    }
     if (json) console.log(JSON.stringify({ loggedIn: false }))
     else console.log('\n  ✗ Not signed in. Run: harness login\n')
     return
@@ -987,9 +1008,10 @@ function openInBrowser(url: string): void {
   } catch { /* ignore */ }
 }
 
-/** Start the adapter from a saved SSO session. Missing credentials never open a browser implicitly. */
+/** Start the adapter from a saved SSO session — or, with HARNESS_LOCAL_ONLY, from this computer's own
+ *  id and no account at all. Missing credentials never open a browser implicitly. */
 async function startCommand(foreground: boolean, repair: boolean = false): Promise<void> {
-  const session = readAuthSession()
+  const session = daemonSession()
   if (!session) {
     console.error('\n  ✗ Not signed in. Run: harness login\n')
     process.exit(1)
@@ -1050,7 +1072,7 @@ async function startCommand(foreground: boolean, repair: boolean = false): Promi
  * and the next login or online start writes the id. A session that already has one costs nothing here.
  */
 async function resolveMachineIfUnknown(session: AuthSession): Promise<void> {
-  if (session.machineId) return
+  if (session.machineId || session.local) return
   try {
     await resolveComputerMachine(AbortSignal.timeout(RESOLVE_ON_START_TIMEOUT_MS))
   } catch (err) {
@@ -1241,7 +1263,10 @@ async function runForeground(session: AuthSession): Promise<void> {
   // Best-effort by construction — it returns rather than throws — and the fatal guard above is the
   // net under the promise itself. The promise is kept so the grid reconcile below can wait for the
   // pinned binary before it hands a token over.
-  const managedGridReady = ensureManagedGrid((m) => console.log(`[grid-runtime] ${m}`))
+  // Nothing to attach a grid to without an account, so local mode neither downloads nor pins one.
+  const managedGridReady: Promise<string | null> = session.local
+    ? Promise.resolve(null)
+    : ensureManagedGrid((m) => console.log(`[grid-runtime] ${m}`))
   void managedGridReady
 
   registry.load()
@@ -1794,7 +1819,9 @@ async function runForeground(session: AuthSession): Promise<void> {
   // briefly on it; otherwise they read the name directly.
   backend.gridReadyProbe = () => gridAttach.probe()
   onBackendConnected = () => gridAttach.run()
-  gridAttach.run()
+  // A grid is minted against the account; without one there is nothing to reconcile and every
+  // attempt would only log its own refusal.
+  if (!session.local) gridAttach.run()
 
   /**
    * Is ANY device surface watching this machine?
@@ -3237,6 +3264,19 @@ async function runForeground(session: AuthSession): Promise<void> {
     return { status: 200, body: withStaleMarker(cached.body, cached.fetchedAt) }
   }
 
+  /** The one row an account-free daemon has: this computer, served by this daemon, in the backend's shape. */
+  function localOnlyMachineList(): { status: number; body: Record<string, unknown> } {
+    const machine = {
+      machineId: backend.machineId,
+      computerId: computerId(),
+      name: hostname(),
+      hostname: hostname(),
+      status: 'running',
+      authMode: 'remote',
+    }
+    return { status: 200, body: { success: true, data: { machines: [machine] } } }
+  }
+
   // Update-handoff state, declared here — ahead of the /api/status handler that reads `restarting` —
   // rather than beside the updater that writes it, so the closure never reaches a `let` in its TDZ.
   let restarting = false
@@ -3568,6 +3608,10 @@ async function runForeground(session: AuthSession): Promise<void> {
       backendUrl: env.BACKEND_WS_URL,
       webUrl: env.WEB_URL,
       connected: backend.isConnected(),
+      // Account-free run: `connected` is false for good, and a local client reads this to know that is
+      // by choice rather than an outage. Absent on a signed-in daemon rather than false, so an older
+      // client that never looks for it sees exactly the shape it always did.
+      ...(session.local ? { localOnly: true } : {}),
       deviceTransportConnected: backend.hasCommander(),
       deviceE2eeConnected: backend.deviceE2eeConnected(),
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
@@ -3620,15 +3664,26 @@ async function runForeground(session: AuthSession): Promise<void> {
       try { return readFileSync(LOG_FILE, 'utf-8').split('\n').slice(-120).join('\n') } catch { return '' }
     },
     onStop: () => { setTimeout(() => process.kill(process.pid, 'SIGTERM'), 50) }, // let the 200 flush first
-    onMachinesList: () => machinesListWithFallback(),
+    // Local mode answers the three reads a local client makes at boot from what this daemon knows —
+    // one machine, this one, no profile, no shares — in the backend's own envelope, so the desktop app
+    // draws its home screen through the same code it draws a signed-in one with.
+    onMachinesList: () => session.local ? Promise.resolve(localOnlyMachineList()) : machinesListWithFallback(),
     onMachineRename: (machineId, name) => proxyBackend('PATCH', `/api/machines/${encodeURIComponent(machineId)}`, { name }),
     onMachineDelete: (machineId) => proxyBackend('DELETE', `/api/machines/${encodeURIComponent(machineId)}`),
-    onAuthMe: () => proxyBackend('GET', '/api/auth/me'),
-    onSharedHarnesses: () => proxyBackend('GET', '/api/harness-shares'),
+    onAuthMe: () => session.local
+      ? Promise.resolve({ status: 401, body: { success: false, error: { code: 'LOCAL_ONLY', message: 'This computer runs without an account.' } } })
+      : proxyBackend('GET', '/api/auth/me'),
+    onSharedHarnesses: () => session.local
+      ? Promise.resolve({ status: 200, body: { success: true, data: { machines: [] } } })
+      : proxyBackend('GET', '/api/harness-shares'),
     // The account's desk — see backend routes/desk.ts. The window edits its tabs through the ops
     // route and hears about everyone else's edits as `desk_changed` (backendSocket.ts).
-    onDeskRead: () => proxyBackend('GET', '/api/desk'),
-    onDeskOps: (body) => proxyBackend('POST', '/api/desk/ops', body),
+    onDeskRead: () => session.local
+      ? Promise.resolve({ status: 200, body: { success: true, data: { tabs: [] } } })
+      : proxyBackend('GET', '/api/desk'),
+    onDeskOps: (body) => session.local
+      ? Promise.resolve({ status: 401, body: { success: false, error: { code: 'LOCAL_ONLY', message: 'This computer runs without an account.' } } })
+      : proxyBackend('POST', '/api/desk/ops', body),
     onStore: (method, path, body) => proxyBackend(method, path, body),
   })
   // Claim the pid file for OURSELVES, and only now that the control port is bound. It used to be
@@ -5119,8 +5174,12 @@ async function runForeground(session: AuthSession): Promise<void> {
   }, LOG_CHECK_INTERVAL_MS)
   logTrimTimer.unref?.() // never hold the event loop open for log upkeep
 
-  backend.connect()
-  console.log(`[cli] dialing ${env.BACKEND_WS_URL}/api/adapter-ws · watching registered sessions for ${ENGINES.length} engines`)
+  if (session.local) {
+    console.log(`[cli] local mode · no account, no backend dial · watching registered sessions for ${ENGINES.length} engines`)
+  } else {
+    backend.connect()
+    console.log(`[cli] dialing ${env.BACKEND_WS_URL}/api/adapter-ws · watching registered sessions for ${ENGINES.length} engines`)
+  }
 
   // ── self-update: poll GCS for a newer bundle → verify+swap → restart IMMEDIATELY (supervised rollback) ──
   //
@@ -5367,8 +5426,9 @@ async function runForeground(session: AuthSession): Promise<void> {
   // The same cache the local `/api/machines` handler answers from (built up near `proxyBackend`), so the
   // dial's wheel and the desktop's list cannot disagree — and neither can go stale while the other is fresh.
   const machineList = machineListCache
-  void machineList.refresh()
-  const machineListTimer = setInterval(() => void machineList.refresh(), 60_000)
+  // Without an account there is no list to fetch, and each try would only log a 401.
+  if (!session.local) void machineList.refresh()
+  const machineListTimer = setInterval(() => { if (!session.local) void machineList.refresh() }, 60_000)
   machineListTimer.unref?.()
 
   const machinePeers = new MachinePeerStore()
@@ -5603,20 +5663,21 @@ async function runForeground(session: AuthSession): Promise<void> {
  * the one fact that tells a daemon on THIS sign-in from one left over from the previous account (see
  * startCommand). Null when the daemon does not say.
  */
-async function runningDaemonStatus(): Promise<{ version: string; sessions: number; machineId: string | null; connected: boolean } | null> {
+async function runningDaemonStatus(): Promise<{ version: string; sessions: number; machineId: string | null; connected: boolean; localOnly: boolean } | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${daemonPort()}/api/status`, {
       signal: AbortSignal.timeout(1_500),
     })
     if (!res.ok) return null
     const body: unknown = await res.json()
-    const status = body as { version?: unknown; sessions?: unknown; machineId?: unknown; connected?: unknown } | null
+    const status = body as { version?: unknown; sessions?: unknown; machineId?: unknown; connected?: unknown; localOnly?: unknown } | null
     const version = typeof status?.version === 'string' && status.version ? status.version : VERSION
     const sessions = Array.isArray(status?.sessions) ? status.sessions.length : 0
     const machineId = typeof status?.machineId === 'string' && status.machineId ? status.machineId : null
     // Missing on a daemon too old to report it — read as connected, as the desktop app does.
     const connected = status?.connected !== false
-    return { version, sessions, machineId, connected }
+    const localOnly = status?.localOnly === true
+    return { version, sessions, machineId, connected, localOnly }
   } catch {
     return null
   }
@@ -5629,7 +5690,7 @@ async function runningDaemonVersion(): Promise<string> {
 // `status` is a definitive state — `launch` only prints this after "[backend] connected" (so it's
 // "● connected", never a one-shot never-updating "connecting…"); `status` prints running/stopped.
 function printInfoBlock(opts: {
-  status: string; pid: number; machineId?: string; sessions: number; version: string
+  status: string; pid: number; machineId?: string; sessions: number; version: string; localOnly?: boolean
 }): void {
   const row = (k: string, v: string): string => `   ${k.padEnd(10)} ${v}`
   const rule = '  ' + '─'.repeat(37)
@@ -5643,7 +5704,7 @@ function printInfoBlock(opts: {
   })()
   if (machineName) console.log(row('machine', machineName))
   console.log(row('version', `v${opts.version}`))
-  console.log(row('backend', env.BACKEND_WS_URL))
+  console.log(row('backend', opts.localOnly ? 'none · local mode' : env.BACKEND_WS_URL))
   console.log(row('agents', `${opts.sessions} available`))
   console.log(row('pid', String(opts.pid)))
   console.log(row('logs', tildify(LOG_FILE)))
@@ -5678,9 +5739,9 @@ async function repairManagedRuntimes(foreground: boolean): Promise<string | null
   return repaired
 }
 
-/** Daemonize (or run inline) with the saved SSO session. */
+/** Daemonize (or run inline) with the saved SSO session, or the local identity in local mode. */
 async function launch(foreground: boolean, repair: boolean = false): Promise<void> {
-  const session = readAuthSession()
+  const session = daemonSession()
   if (!session) throw new Error('Not signed in. Run `harness login`.')
   // The installer already provisioned the managed Node runtime and pointed the launcher at it, so a
   // normal start just reads what's there (cheap: no network, no download). `--repair` re-runs that
@@ -5760,11 +5821,12 @@ async function spawnDaemon(session: AuthSession, runtimeNode: string | null): Pr
   // status` says whether the link is up; the desktop app reads the same fact off `/api/status`.
   const daemonStatus = await runningDaemonStatus()
   printInfoBlock({
-    status: '● started · connecting to the backend in the background',
+    status: session.local ? '● started · local mode, no account' : '● started · connecting to the backend in the background',
     pid: child.pid ?? 0,
     machineId: session.machineId,
     sessions: daemonStatus?.sessions ?? 0,
     version: daemonStatus?.version ?? VERSION,
+    localOnly: session.local === true,
   })
   process.exit(0)
 }
@@ -6410,7 +6472,7 @@ async function machinesDeleteCommand(id: string | undefined, assumeYes: boolean)
 async function status(): Promise<void> {
   const pid = readPid()
   const alive = pid != null && isAlive(pid)
-  const session = readAuthSession()
+  const session = daemonSession()
   if (!session) { console.log('machine: not signed in. Run: harness login'); process.exit(0) }
   const daemonStatus = alive ? await runningDaemonStatus() : null
   if (!alive) registry.load()
@@ -6421,14 +6483,17 @@ async function status(): Promise<void> {
       ? '○ stopped'
       : daemonStatus == null
         ? '● running · not answering yet'
-        : daemonStatus.connected
-          ? '● running · backend connected'
-          : '● running · backend offline — retrying in the background',
+        : daemonStatus.localOnly
+          ? '● running · local mode, no account'
+          : daemonStatus.connected
+            ? '● running · backend connected'
+            : '● running · backend offline — retrying in the background',
     pid: pid ?? 0,
     machineId: session.machineId,
     sessions: daemonStatus?.sessions ?? 0,
     // A stopped daemon answers nothing, so this falls back to the local build — which is what will run.
     version: daemonStatus?.version ?? VERSION,
+    localOnly: daemonStatus?.localOnly ?? session.local === true,
   })
   process.exit(0)
 }
@@ -6516,8 +6581,8 @@ switch (cmd) {
   case 'join':
     console.error('`harness join` has been removed. Run `harness login`, then `harness start`.')
     process.exit(1)
-  case '__run': { // internal: detached daemon child reads the durable SSO session
-    const session = readAuthSession()
+  case '__run': { // internal: detached daemon child reads the durable SSO session (or runs local-only)
+    const session = daemonSession()
     if (!session) onError(new Error('no SSO session for __run'))
     else runForeground(session).catch(onError)
     break

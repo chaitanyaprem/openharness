@@ -256,3 +256,107 @@ describe('start beside a daemon that serves another account', () => {
       .resolves.toBe('alive')
   }, 20_000)
 })
+
+describe('local mode (HARNESS_LOCAL_ONLY)', () => {
+  // An account-free daemon: this computer's own id, no session file, no backend. The grid and hook
+  // installs are off as they are for every test here — they write to the real home and the network.
+  const LOCAL: NodeJS.ProcessEnv = { HARNESS_LOCAL_ONLY: 'true', DISABLE_HOOK_INSTALL: 'true', DISABLE_GRID_INSTALL: 'true' }
+
+  function lastLine(stdout: string): string {
+    const lines = stdout.trim().split('\n').filter((l) => l.trim())
+    return lines[lines.length - 1] ?? ''
+  }
+
+  async function freePort(): Promise<number> {
+    const server = createServer()
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    return port
+  }
+
+  async function waitForStatus(port: number, deadlineMs: number): Promise<Record<string, unknown>> {
+    const until = Date.now() + deadlineMs
+    let lastError = 'no answer yet'
+    while (Date.now() < until) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/status`, { signal: AbortSignal.timeout(1_000) })
+        if (res.ok) return await res.json() as Record<string, unknown>
+        lastError = `HTTP ${res.status}`
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err)
+      }
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    throw new Error(`the daemon never answered /api/status on ${port}: ${lastError}`)
+  }
+
+  it('auth status names local mode, with the computer id, and writes no session', () => {
+    const root = freshRoot()
+    const result = spawnSync(process.execPath, [TSX, CLI_SOURCE, 'auth', 'status', '--json'], {
+      cwd: CLI_ROOT, encoding: 'utf8', env: envFor(root, LOCAL),
+    })
+    expect(result.status).toBe(0)
+    const payload = JSON.parse(lastLine(result.stdout)) as Record<string, unknown>
+    expect(payload).toMatchObject({ loggedIn: false, localOnly: true })
+    expect(payload.computerId).toMatch(/^[0-9a-f-]{16,64}$/i)
+    expect(existsSync(join(root, 'auth', 'session.json'))).toBe(false)
+  })
+
+  it('a saved sign-in wins over the flag', () => {
+    const root = freshRoot()
+    seedSession(root)
+    const result = spawnSync(process.execPath, [TSX, CLI_SOURCE, 'auth', 'status', '--json'], {
+      cwd: CLI_ROOT, encoding: 'utf8', env: envFor(root, LOCAL),
+    })
+    expect(result.status).toBe(0)
+    const payload = JSON.parse(lastLine(result.stdout)) as Record<string, unknown>
+    expect(payload.loggedIn).toBe(true)
+    expect(payload.machineId).toBe('m_seeded')
+    expect(payload).not.toHaveProperty('localOnly')
+  })
+
+  it('without the flag, a missing session still refuses to start', () => {
+    const result = run('start')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Not signed in. Run: harness login')
+  })
+
+  it('start boots the daemon on the computer id, never dials, and serves this computer alone', async () => {
+    const root = freshRoot()
+    const port = await freePort()
+    const child = spawn(process.execPath, [TSX, CLI_SOURCE, 'start'], {
+      cwd: CLI_ROOT, env: envFor(root, { ...LOCAL, PORT: String(port) }), stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    children.push(child)
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+
+    const status = await waitForStatus(port, 25_000)
+    expect(status).toMatchObject({ localOnly: true, connected: false })
+    expect(status.machineId).toBe(status.computerId)
+    expect(status.computerId).toMatch(/^[0-9a-f-]{16,64}$/i)
+
+    const base = `http://127.0.0.1:${port}`
+    const machines = await (await fetch(`${base}/api/machines`)).json() as Record<string, unknown>
+    expect(machines).toMatchObject({
+      success: true,
+      data: { machines: [{ machineId: status.machineId, computerId: status.computerId, status: 'running' }] },
+    })
+    const me = await fetch(`${base}/api/auth/me`)
+    expect(me.status).toBe(401)
+    expect(((await me.json()) as { error: { code: string } }).error.code).toBe('LOCAL_ONLY')
+    const shares = await (await fetch(`${base}/api/harness-shares`)).json()
+    expect(shares).toEqual({ success: true, data: { machines: [] } })
+
+    child.kill('SIGTERM')
+    await exited
+    expect(stdout).toContain('local mode')
+    expect(stdout + stderr).not.toContain('dialing')
+    expect(stdout + stderr).not.toContain('resolve-computer')
+    expect(existsSync(join(root, 'auth', 'session.json'))).toBe(false)
+  }, 40_000)
+})

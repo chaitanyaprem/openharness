@@ -97,6 +97,8 @@ on the backend link refreshes the SSO token and reconnects; only a refresh token
 signs the computer out. See [`RELEASE.md`](RELEASE.md) for publishing and the update internals.
 Disable with `ADAPTER_UPDATE_DISABLE=true`.
 
+**Local mode (no account).** `HARNESS_LOCAL_ONLY=true harness start` runs the daemon for this computer alone: no sign-in is read or written, the backend is never dialed, the managed grid is left alone, and the local WebSocket serves the loopback on its own. `harness auth status --json` answers `{"loggedIn":false,"localOnly":true,"computerId":…}`, `/api/status` carries `localOnly: true` beside `connected: false`, and `/api/machines` lists this computer as its one machine, so the desktop app draws its home screen through the same code it draws a signed-in one with. A saved sign-in always wins over the flag, so it can never hide an account that is there; `harness login` leaves local mode the moment it succeeds. Everything that needs the relay — linking another machine, shares, the Harness Store — answers 401 until then.
+
 Custom Herdr-capable builds must keep self-update disabled or use a fork-owned signed
 `ADAPTER_UPDATE_URL` until that build is available in the configured upstream manifest. Otherwise the
 updater can legitimately replace the custom bundle with a release that lacks its terminal support.
@@ -260,6 +262,7 @@ reported as such, not described as exercised.
 | `ADAPTER_UPDATE_CHECK_MS` | `60000` | how often (ms) to poll for a newer build (no check on start — `harness start` already staged the newest) |
 | `ADAPTER_UPDATE_SLOT_SEC` | `45` | the wall-clock second each poll lands on; keeps clear of the desktop's `harness start` slot at :15. Negative = plain interval |
 | `ADAPTER_UPDATE_DISABLE` | `false` | set `true` to turn self-update off |
+| `HARNESS_LOCAL_ONLY` | `false` | set `true` to run this computer's daemon without an account: no session, no backend dial, this computer as the one machine. A saved sign-in still wins |
 | `ADAPTER_CLI_DIR` | `~/.harness/cli` | install dir holding the `cli.js`/`notify.mjs` the updater swaps |
 | `LOG_FRAMES` | `false` | one log line per backend frame — type, audience and opaque ids, never a payload body. Every content-bearing frame is encrypted before it reaches the socket, so this is the only way to see what the daemon actually sent |
 | `HARNESS_HOOK_DEADLINE_MS` | `4500` | wall-clock budget a hook gives itself before abandoning optional work. Raise it on a slow or heavily loaded machine, where the budget is spent on load rather than on the hook and the offline registry fallback silently does nothing. Clamped, never below the default |

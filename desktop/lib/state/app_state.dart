@@ -27,6 +27,7 @@ import '../core/agent_preference.dart';
 import '../core/dsh_catalog.dart';
 import '../core/engine_availability.dart';
 import '../core/local_hostname.dart';
+import '../core/local_mode.dart';
 import '../core/local_git_projects.dart';
 import '../core/test_run.dart';
 import '../core/models.dart';
@@ -1530,6 +1531,18 @@ class AppNotifier extends ChangeNotifier {
   Future<void>? _logoutInFlight;
   Future<void>? _workspaceCleanup;
 
+  /// Whether this computer runs without an account (see [LocalModeStore]). One store for the boot
+  /// path, the login screen, the account menu and the daemon supervisor, so they cannot disagree.
+  final LocalModeStore _localMode;
+  bool get localOnly => _localMode.value;
+
+  /// Shown on the login screen when local mode is remembered but the installed CLI predates it: a
+  /// `harness start` without a session would only refuse, and the app would sit on an error it
+  /// could not explain.
+  static const localModeUnsupportedMessage =
+      'The harness CLI on this computer cannot run without an account. Update it to a build with '
+      'local mode, or sign in.';
+
   AppNotifier({
     required AppConfig config,
     required AuthSession authSession,
@@ -1544,12 +1557,14 @@ class AppNotifier extends ChangeNotifier {
     PeerLinkClient? peerLinks,
     ViewerServices? viewer,
     PaneLayoutStore? paneLayoutStore,
+    LocalModeStore? localMode,
     this.turnActivityTimeout = const Duration(seconds: 12),
     AlertSounds? alerts,
     AgentAlerts? agentAlerts,
   }) : alerts = alerts ?? AlertSounds(store: alertSoundStore),
        agentAlerts = agentAlerts ?? AgentAlerts(),
        _paneLayout = paneLayoutStore,
+       _localMode = localMode ?? localModeStore,
        // Remembers "a dial has been seen here" on the same terms the pane
        // layout is remembered: with a layout store there is a state file, and
        // without one (the tests) nothing is written anywhere.
@@ -2455,10 +2470,28 @@ class AppNotifier extends ChangeNotifier {
       if (!_authWorkCurrent(revision)) return;
       if (!authStatus.loggedIn) {
         currentUser = null;
+        if (localOnly && authStatus.localOnly) {
+          // Chosen on the login screen and remembered: no account, this computer alone. The CLI
+          // answered for the same flag, so its daemon starts on this computer's own id and lists
+          // it as the one machine; the home screen is drawn through the signed-in path from here.
+          status = AppStatus.bootstrapping;
+          notifyListeners();
+          await _finishBootstrapSignedIn();
+          return;
+        }
+        if (localOnly) {
+          // Remembered, but this CLI does not know the flag (an upstream build). Say so rather
+          // than start a daemon that can only refuse.
+          unawaited(_localMode.set(false));
+          _lastError = localModeUnsupportedMessage;
+          _lastErrorRetryable = false;
+        }
         status = AppStatus.unauthenticated;
         notifyListeners();
         return;
       }
+      // A sign-in on disk outranks the flag in the CLI, so it does here too.
+      unawaited(_localMode.set(false));
       status = AppStatus.bootstrapping;
       notifyListeners();
       await _finishBootstrapSignedIn();
@@ -2725,10 +2758,14 @@ class AppNotifier extends ChangeNotifier {
     notifyListeners();
     // The CLI has confirmed sign-in and daemon readiness. Display-name/avatar
     // metadata is independent of machine discovery and must not delay work.
-    unawaited(_loadProfile());
-    // The desk too: tabs from the other computers appear as intent, like the
-    // restored ones, and attach as their machines answer.
-    _deskEnsure(revision);
+    // No account, no profile and no desk: the local daemon answers those with
+    // 401 by design, and a request it can only refuse is not worth making.
+    if (!localOnly) {
+      unawaited(_loadProfile());
+      // The desk too: tabs from the other computers appear as intent, like the
+      // restored ones, and attach as their machines answer.
+      _deskEnsure(revision);
+    }
     try {
       await refreshMachines();
     } catch (error) {
@@ -2812,7 +2849,9 @@ class AppNotifier extends ChangeNotifier {
         // give unconditionally.
         final authStatus = await cliLogin.checkStatus();
         if (!_authWorkCurrent(revision)) return;
-        if (!authStatus.loggedIn) {
+        // Local mode has no session to lose, so a daemon that is down there is
+        // down for an ordinary reason and gets the ordinary advice.
+        if (!authStatus.loggedIn && !localOnly) {
           _signedOutAtRuntime(_signedOutMessage);
           return;
         }
@@ -2865,7 +2904,8 @@ class AppNotifier extends ChangeNotifier {
   void _startDaemonSupervision(LocalCliDiscovery discovery) {
     _daemonSupervisionTimer ??= discovery.startSupervising(
       spawnAllowedAt: inSpawnSlot,
-      stillSignedIn: () async => (await cliLogin.checkStatus()).loggedIn,
+      stillSignedIn: () async =>
+          localOnly || (await cliLogin.checkStatus()).loggedIn,
       onSignedOut: () => _signedOutAtRuntime(_signedOutMessage),
       onSnapshot: _updateLocalProjectSnapshot,
       onBackendOnline: _noteBackendOnline,
@@ -3174,6 +3214,10 @@ class AppNotifier extends ChangeNotifier {
     _closedHistory.clear();
     _monitorHarnesses.clear();
     _lastError = null;
+    // A sign-in ends local mode: the CLI lets a saved session win over the
+    // flag, and the app stops passing it so the two never disagree. Not
+    // awaited: the value moves at once, and the write is the store's business.
+    unawaited(_localMode.set(false));
     status = AppStatus.bootstrapping;
     signingIn = true;
     pendingAuthorizeUrl = null;
@@ -3244,6 +3288,49 @@ class AppNotifier extends ChangeNotifier {
     ++_loginBrowserRevision;
     openingLoginBrowser = false;
     loginBrowserError = null;
+  }
+
+  /// The login screen's other door: run this computer without an account.
+  ///
+  /// Remembers the choice, confirms the installed CLI knows the flag (it answers `localOnly` to
+  /// `auth status` when it does), and boots through the same path a sign-in takes: the daemon
+  /// comes up on this computer's own id, lists this computer as its one machine, and the home
+  /// screen draws it. A CLI that predates local mode sends the person back here with a reason.
+  Future<void> continueWithoutAccount() async {
+    if (_disposed || signingIn) return;
+    final revision = _invalidateAuthWork();
+    _closedHistory.clear();
+    _lastError = null;
+    status = AppStatus.bootstrapping;
+    notifyListeners();
+    unawaited(_localMode.set(true));
+    try {
+      final authStatus = await cliLogin.checkStatus();
+      if (!_authWorkCurrent(revision)) return;
+      if (authStatus.loggedIn) {
+        // A session is on disk after all; it outranks the flag in the CLI and so here.
+        unawaited(_localMode.set(false));
+      } else if (!authStatus.localOnly) {
+        unawaited(_localMode.set(false));
+        currentUser = null;
+        status = AppStatus.unauthenticated;
+        _lastError = localModeUnsupportedMessage;
+        _lastErrorRetryable = false;
+        notifyListeners();
+        return;
+      }
+      if (!_authWorkCurrent(revision)) return;
+      await _finishBootstrapSignedIn();
+    } catch (error) {
+      if (!_authWorkCurrent(revision)) return;
+      unawaited(_localMode.set(false));
+      currentUser = null;
+      status = AppStatus.unauthenticated;
+      _lastError = error.toString();
+      _lastErrorRetryable = true;
+      notifyListeners();
+    }
+    if (_authWorkCurrent(revision)) notifyListeners();
   }
 
   /// Reopens the current authorization URL without creating another login.
@@ -3334,6 +3421,11 @@ class AppNotifier extends ChangeNotifier {
     pendingAuthorizeUrl = null;
     _closedHistory.clear();
     _monitorHarnesses.clear();
+    // Leaving local mode is the same exit: the tiles go, the daemon is stopped
+    // through `harness logout` below (nothing to clear, but the next start must
+    // run on the account rather than on this computer's bare id), and the login
+    // screen is next.
+    unawaited(_localMode.set(false));
     status = AppStatus.unauthenticated;
     currentUser = null;
     analyticsAccount.clear();

@@ -3,6 +3,7 @@ import '../stats/harness_stats.dart';
 import '../terminal/terminal_font_store.dart';
 import '../terminal/terminal_theme_store.dart';
 import '../notify/alert_sounds.dart';
+import 'local_mode.dart';
 
 /// Every preference that has to be in place BEFORE the first frame.
 ///
@@ -23,6 +24,7 @@ Future<void> loadPersistedSettings({
   HarnessStats? stats,
   AlertSoundStore? alertSounds,
   ScreenAlertStore? screenAlerts,
+  LocalModeStore? localMode,
 }) async {
   // Independent stores may load together, but all must finish before runApp.
   // Font and appearance share a serialized file store; each reads its related
@@ -43,5 +45,9 @@ Future<void> loadPersistedSettings({
     // noise, and a late read would let one through on the default while the person had it off.
     (alertSounds ?? alertSoundStore).load(),
     (screenAlerts ?? screenAlertStore).load(),
+    // The boot path reads this before it picks a screen: a computer that runs
+    // without an account must not land on the login screen while its choice
+    // is still on its way from disk.
+    (localMode ?? localModeStore).load(),
   ]);
 }

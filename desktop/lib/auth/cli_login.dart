@@ -11,6 +11,11 @@ class CliAuthStatus {
   /// Signed in, but the CLI could not refresh the token just now (no network, SSO down). Still
   /// [loggedIn]: the session is on disk and the daemon runs on it; only the backend is out of reach.
   final bool offline;
+
+  /// The CLI runs this computer without an account (`HARNESS_LOCAL_ONLY`): not [loggedIn], and not
+  /// signed out either. Its daemon starts on the computer's own id and serves it as the one machine.
+  /// A CLI that predates local mode never answers this, which is how the app tells the two apart.
+  final bool localOnly;
   final String? computerId;
   final String? machineId;
   final String? autonomousEnv;
@@ -18,6 +23,7 @@ class CliAuthStatus {
   const CliAuthStatus({
     required this.loggedIn,
     this.offline = false,
+    this.localOnly = false,
     this.computerId,
     this.machineId,
     this.autonomousEnv,
@@ -26,6 +32,7 @@ class CliAuthStatus {
   factory CliAuthStatus.fromJson(Map<String, dynamic> json) => CliAuthStatus(
     loggedIn: json['loggedIn'] == true,
     offline: json['offline'] == true,
+    localOnly: json['localOnly'] == true,
     computerId: json['computerId'] as String?,
     machineId: json['machineId'] as String?,
     autonomousEnv: json['autonomousEnv'] as String?,

@@ -221,6 +221,19 @@ class _ActionState extends State<_Action> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
+          const SizedBox(height: 16),
+          // The other door. Not a second filled button: one primary action per
+          // card, and the quiet weight says what this is — a way to run this
+          // computer's agents with no relay and no account, not a rival to
+          // signing in. Other machines need the sign-in; this one does not.
+          TextButton(
+            key: const Key('use-without-account-button'),
+            onPressed: notifier.continueWithoutAccount,
+            style: TextButton.styleFrom(
+              foregroundColor: grid.AppPalette.textSecondary,
+            ),
+            child: const Text('Use this computer without an account'),
+          ),
         ],
       );
     }

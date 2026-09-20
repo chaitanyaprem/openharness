@@ -11,6 +11,9 @@ export interface AuthSession {
   computerId: string
   machineId?: string
   updatedAt: number
+  /** Never on disk. Set only on the in-memory identity a HARNESS_LOCAL_ONLY daemon runs on, so the
+   *  daemon can tell an account-free run from a signed-in one whose machine is not resolved yet. */
+  local?: true
 }
 
 export class AuthSessionError extends Error {

@@ -3,6 +3,7 @@ import 'host_platform.dart';
 import 'dart:io';
 
 import '../logging/cli_transcript.dart';
+import 'local_mode.dart';
 
 /// Runs the Harness CLI owned by this desktop app without depending on a
 /// terminal shell, its rc files, or Finder's inherited PATH.
@@ -40,6 +41,11 @@ class HarnessCliRunner {
   })
   _startProcess;
 
+  /// Whether the next command runs the CLI without an account
+  /// (`HARNESS_LOCAL_ONLY=true`). Read per command, never captured: the choice
+  /// changes while the app runs, on the login screen and in the account menu.
+  final bool Function() _localMode;
+
   HarnessCliRunner({
     Directory? harnessHome,
     Map<String, String>? environment,
@@ -56,7 +62,9 @@ class HarnessCliRunner {
       Map<String, String>? environment,
     })?
     startProcess,
+    bool Function()? localMode,
   }) : environment = environment ?? Platform.environment,
+       _localMode = localMode ?? (() => localModeStore.value),
        harnessHome = harnessHome ?? Directory(_defaultHarnessHome()),
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start;
@@ -212,6 +220,10 @@ class HarnessCliRunner {
             ).hasMatch(configuredLocale))) {
       commandEnvironment['LC_ALL'] = 'C.UTF-8';
     }
+    // Local mode rides the environment, not argv: the daemon's own restarts
+    // (a self-update, the rollback respawn) copy `process.env` into the child,
+    // so the flag survives them where an argument would not.
+    if (_localMode()) commandEnvironment['HARNESS_LOCAL_ONLY'] = 'true';
     return commandEnvironment;
   }
 }
