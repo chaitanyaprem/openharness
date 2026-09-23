@@ -1,0 +1,18 @@
+[Unit]
+Description=Harness self-hosted relay
+After=network-online.target mongod.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=harness
+Group=harness
+WorkingDirectory=/opt/harness/backend
+EnvironmentFile=/etc/harness/backend.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
