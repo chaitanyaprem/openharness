@@ -192,7 +192,8 @@ describe('self-host enrollment', () => {
     const root = freshRoot()
     const relay = await fakeRelay()
     const port = await freePort()
-    const child = spawn(process.execPath, [TSX, CLI_SOURCE, 'start'], {
+    // Foreground: a plain `start` detaches the daemon, and killing the parent would leave it running.
+    const child = spawn(process.execPath, [TSX, CLI_SOURCE, 'start', '-f'], {
       cwd: CLI_ROOT,
       env: cliEnv(root, { HARNESS_LOCAL_ONLY: 'true', BACKEND_WS_URL: relay.ws, PORT: String(port) }),
       stdio: ['ignore', 'pipe', 'pipe'],
