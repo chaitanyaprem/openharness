@@ -3,7 +3,9 @@ import '../stats/harness_stats.dart';
 import '../terminal/terminal_font_store.dart';
 import '../terminal/terminal_theme_store.dart';
 import '../notify/alert_sounds.dart';
+import '../analytics/analytics_config.dart';
 import 'local_mode.dart';
+import 'self_host_config.dart';
 
 /// Every preference that has to be in place BEFORE the first frame.
 ///
@@ -26,6 +28,7 @@ Future<void> loadPersistedSettings({
   ScreenAlertStore? screenAlerts,
   LocalModeStore? localMode,
 }) async {
+  if (SelfHostConfig.load().selfHosted) AnalyticsConfig.suppress();
   // Independent stores may load together, but all must finish before runApp.
   // Font and appearance share a serialized file store; each reads its related
   // preferences as one snapshot. Stats uses a separate file and can overlap.

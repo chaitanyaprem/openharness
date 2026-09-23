@@ -28,6 +28,7 @@ import '../core/dsh_catalog.dart';
 import '../core/engine_availability.dart';
 import '../core/local_hostname.dart';
 import '../core/local_mode.dart';
+import '../core/self_host_config.dart';
 import '../core/local_git_projects.dart';
 import '../core/test_run.dart';
 import '../core/models.dart';
@@ -582,7 +583,8 @@ class AppNotifier extends ChangeNotifier {
   // Update checks do not depend on the daemon or SSO. A signed-out user should
   // still be able to replace a broken desktop build from the login screen.
   Timer? _updateCheckTimer;
-  late final DesktopUpdater _updater = desktopUpdater ?? DesktopUpdater();
+  late final DesktopUpdater _updater = desktopUpdater ??
+      DesktopUpdater(enabled: !SelfHostConfig.load().selfHosted);
   Future<ManualUpdateCheck>? _manualUpdateCheckInFlight;
   DesktopUpdateCheck? lastUpdateCheck;
   bool get updateChecksEnabled => viewer == null && _updater.canCheck;

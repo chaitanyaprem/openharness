@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../logging/cli_transcript.dart';
 import 'local_mode.dart';
+import 'self_host_config.dart';
 
 /// Runs the Harness CLI owned by this desktop app without depending on a
 /// terminal shell, its rc files, or Finder's inherited PATH.
@@ -224,7 +225,7 @@ class HarnessCliRunner {
     // (a self-update, the rollback respawn) copy `process.env` into the child,
     // so the flag survives them where an argument would not.
     if (_localMode()) commandEnvironment['HARNESS_LOCAL_ONLY'] = 'true';
-    return commandEnvironment;
+    return SelfHostConfig.load(environment: environment).cliEnvironment(commandEnvironment);
   }
 }
 

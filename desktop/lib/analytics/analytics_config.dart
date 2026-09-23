@@ -99,7 +99,17 @@ class AnalyticsConfig {
     );
   }
 
+  /// Set from startup when `~/.harness/self-host.json` says this computer is
+  /// self-hosted. The process environment is not the only switch: a Finder
+  /// launch does not carry `HARNESS_ANALYTICS_DISABLED`.
+  static bool suppressed = false;
+
+  static void suppress() {
+    suppressed = true;
+  }
+
   static String? _offReason(String key) {
+    if (suppressed) return 'Self-hosted mode does not send analytics.';
     if (key.isEmpty) {
       return 'This build carries no analytics key '
           '(set $keyEnvKey to turn the stream on).';

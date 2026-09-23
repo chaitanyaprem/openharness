@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../core/harness_cli_runner.dart';
+import '../core/self_host_config.dart';
 
 /// The CLI-only installer contract for callers that already own host setup.
 /// Desktop verifies tmux, the active Linux clipboard helper and the rest of
@@ -764,6 +765,21 @@ class EnvironmentProvisioner {
       }
 
       if (_isMacOS && !probe.tmuxRuns) {
+        if (SelfHostConfig.load().selfHosted) {
+          const detail = 'Self-hosted mode does not download tmux. Install tmux, then retry.';
+          emit(
+            step: EnvironmentStep.tmux,
+            status: EnvironmentStepStatus.failed,
+            message: detail,
+            phase: EnvironmentSetupPhase.failed,
+            failure: EnvironmentFailure(
+              step: EnvironmentStep.tmux,
+              title: 'tmux is not installed',
+              detail: detail,
+            ),
+          );
+          return state;
+        }
         // One in-app step whichever rung applies: the installer's host half
         // uses the Homebrew already here or downloads the managed build.
         // Neither needs a password, so no Terminal window and no waiting.
@@ -1312,6 +1328,11 @@ fi''';
       runProcess: _probeHarnessCommand,
     );
     if (await _hasHarness()) return;
+    if (SelfHostConfig.load().selfHosted) {
+      throw StateError(
+        'Self-hosted mode does not download the Harness CLI. Install it from your fork, then retry.',
+      );
+    }
     // No interpreter is named here. install.sh provisions the same
     // checksum-verified Node under `~/.harness/runtime` when the computer has
     // none, records it in `current-node`, and bakes its absolute path into the
