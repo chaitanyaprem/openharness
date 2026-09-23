@@ -25,6 +25,7 @@ import type { RegisteredSession } from './registry.js'
 import type { AgentEngine } from '../engines/types.js'
 import { parseMuseQuestionPane } from '../engines/muse/askQuestion.js'
 import { ampSelectionKeys, parseAmpQuestionPane } from '../engines/amp/askQuestion.js'
+import { ompSelectionKeys, parseOmpQuestionPane } from '../engines/omp/askQuestion.js'
 import { kiloSelectionKeys, parseKiloQuestionPane } from '../engines/kilo/askQuestion.js'
 import { parseCursorPermissionPane } from '../engines/cursor/askQuestion.js'
 import { parseDevinPermissionPane, parseDevinQuestionPane } from '../engines/devin/askQuestion.js'
@@ -75,6 +76,12 @@ export interface QuestionView {
   multi: boolean
   /** The "Type something." row, when the dialog offers free text. */
   typeRow: QuestionRow | null
+  /**
+   * For a dialog walked with the arrow keys: the index of the row the cursor is on NOW. Absent means
+   * the walk starts from the first row, which is where Amp and Kilo always open. Oh My Pi draws the
+   * cursor (`>`), and a person may have moved it in the pane before the device answers.
+   */
+  cursor?: number
 }
 
 export interface ReviewView {
@@ -189,6 +196,8 @@ export function parseEngineQuestionPane(engine: AgentEngine, capture: string): P
     return opencodeReview(plain) ?? parseQuestionPane(plain)
   }
   if (engine === 'codex') return withCodexLabels(parseQuestionPane(capture))
+  // omp's approval and `ask` dialogs number nothing and draw a cursor; see engines/omp/askQuestion.ts.
+  if (engine === 'omp') return parseOmpQuestionPane(capture)
   return parseQuestionPane(capture)
 }
 
@@ -566,6 +575,8 @@ export function parseQuestionPane(capture: string): PaneView {
  */
 function rowKeys(engine: AgentEngine, row: QuestionRow, view?: QuestionView): string[] {
   if (engine === 'amp') return ampSelectionKeys(row)
+  // omp walks from wherever its cursor is, which a person may have moved in the pane.
+  if (engine === 'omp') return ompSelectionKeys(row, view)
   if (engine === 'codex') return codexRowKeys(row, view)
   // Kilo's rows sit side by side, so its walk is horizontal — see engines/kilo/askQuestion.ts.
   if (engine === 'kilo') return kiloSelectionKeys(row)
@@ -814,7 +825,7 @@ const GONE_TICKS = 2
 // cancel` footer, which is the shared parser's anchor exactly (`__fixtures__/permission-codex.txt`), and
 // the question it lands on is the command itself. Membership in this set is what starts the poll, so an
 // engine belongs here only once something can actually read its pane.
-const QUESTION_ENGINES = new Set<AgentEngine>(['claude', 'commandcode', 'codex', 'cursor', 'devin', 'hermes', 'opencode', 'muse', 'amp', 'kilo', 'grok', 'agy', 'copilot'])
+const QUESTION_ENGINES = new Set<AgentEngine>(['claude', 'commandcode', 'codex', 'cursor', 'devin', 'hermes', 'opencode', 'muse', 'amp', 'kilo', 'grok', 'agy', 'copilot', 'omp'])
 
 /** Does this engine ever paint a question dialog? Callers use it to decide whether to watch its pane. */
 export function pollsQuestions(engine: AgentEngine): boolean {

@@ -101,8 +101,10 @@ message records match pi's, but four things around them did not:
   binds nothing. Only files directly under `sessions/<dir>/` are main sessions.
 - **Sub-agents run the extension too.** The discovery extension registers only when `ctx.hasUI` is
   true, the test herdr's own omp integration uses.
-- **omp has approval prompts** (`--approval-mode`, `--auto-approve`), where pi has none. No parser is
-  written for them yet.
+- **omp has approval prompts** (`--approval-mode`, `--auto-approve`), where pi has none. Its approval
+  and `ask` dialogs number nothing and draw a `>` cursor, so `engines/omp/askQuestion.ts` walks from
+  the cursor's row rather than from the top: a person may have moved it in the pane first, and an
+  index walk from there turns a device's "Approve" into a deny.
 
 Two of those (the catalog and the footer) would have shipped as "working" under any test written from
 the parent engine's fixtures. So: inherit the *structure*, measure the *values*. And where a fork's
