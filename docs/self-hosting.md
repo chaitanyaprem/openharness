@@ -98,7 +98,13 @@ mongosh --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]}
 
 Confirm the process is up with `curl -s http://127.0.0.1:8085/api/health`.
 
-Pubkey allowlist instead of a token: write one key per line to a file on the server, set `HARNESS_PUBKEY_ALLOWLIST` to that path, and leave the token empty. A machine's public key is printed by `harness` from `~/.harness/cli/data/e2e/identity.json` (`pub`, base64). The daemon creates that file on first enroll attempt, so the first enroll with a token is the practical way to learn the key. After every machine is listed, remove the token from the server env and from the clients.
+Pubkey allowlist instead of a token: write one key per line to a file on the server, set `HARNESS_PUBKEY_ALLOWLIST` to that path, and leave the token empty. No `harness` command prints a machine's public key. It is the `pub` field (base64) of `~/.harness/cli/data/e2e/identity.json`:
+
+```bash
+node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.HOME + "/.harness/cli/data/e2e/identity.json", "utf8")).pub)'
+```
+
+`harness login` creates that file before it asks the relay for anything, so running it once without a token (it fails with 403) is enough to get a key you can add to the allowlist. After every machine is listed, remove the token from the server env and from the clients.
 
 ## Daemon on Linux or macOS
 
@@ -111,7 +117,9 @@ node cli/node_modules/tsx/dist/cli.mjs cli/src/cli.ts login
 node cli/node_modules/tsx/dist/cli.mjs cli/src/cli.ts start
 ```
 
-`harness login` with the config file above enrolls this computer and writes `~/.harness/auth/session.json`. The session holds the user token, mode 0600. It does not open a browser. `harness start` enrolls on its own if that file is missing, which is what you want on a headless box.
+`harness login` with the config file above enrolls this computer and writes `~/.harness/auth/session.json`. The session holds the user token, mode 0600, and records the relay that issued it. It does not open a browser. `harness start` enrolls on its own if that file is missing, which is what you want on a headless box.
+
+The CLI only uses a session issued by the relay it currently points at. If you switch a signed-in computer to self-hosted, or point it at another relay, the next `login` or `start` enrolls again and overwrites the old session. Turn self-hosted mode off and the enrolled session reads as signed out, so `harness login` goes back to SSO.
 
 On the machine you will connect to:
 
@@ -139,7 +147,7 @@ harness dsh install --link /path/to/package
 
 Build the Flutter app from `desktop/` the way upstream documents. The app reads `~/.harness/self-host.json` at startup. It passes `HARNESS_SELF_HOSTED` and the backend URL into every CLI command, skips the GCS update check, and does not send analytics. If the CLI or tmux is missing it stops and tells you to install them. It does not curl `cdn.autonomous.ai`.
 
-"Use this computer without an account" is the earlier local-only mode (`HARNESS_LOCAL_ONLY`). That mode never dials a relay, so it cannot see other machines. Self-hosted mode is the one that enrolls and links. You can use local-only on a laptop that should stay off the relay.
+"Use this computer without an account" is the earlier local-only mode (`HARNESS_LOCAL_ONLY`). That mode never dials a relay, so it cannot see other machines. Self-hosted mode is the one that enrolls and links. You can use local-only on a laptop that should stay off the relay, even with `self-host.json` in place, because local mode skips enrollment.
 
 ## Security model
 

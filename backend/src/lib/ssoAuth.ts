@@ -181,7 +181,8 @@ export async function authenticateAccessToken(
   autonomousEnv: AutonomousEnvironment = 'prod',
   { enforceEnv = true }: { enforceEnv?: boolean } = {},
 ): Promise<AuthUser> {
-  // Self-hosted daemons present a machine api key. Do not call Autonomous SSO for it.
+  // Self-hosted daemons present the relay's one user token from /api/self-host/enroll. Do not call
+  // Autonomous SSO for it.
   if (env.HARNESS_SELF_HOSTED) {
     const { selfHostUserForToken } = await import('./selfHostAuth.js')
     const user = await selfHostUserForToken(token)

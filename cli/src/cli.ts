@@ -1028,7 +1028,9 @@ function openInBrowser(url: string): void {
 /** Start the adapter from a saved SSO session — or, with HARNESS_LOCAL_ONLY, from this computer's own
  *  id and no account at all. Missing credentials never open a browser implicitly. */
 async function startCommand(foreground: boolean, repair: boolean = false): Promise<void> {
-  if (env.HARNESS_SELF_HOSTED && !readAuthSession()) {
+  // Local mode never dials a relay, enrollment included. A self-host config on the same computer
+  // only matters once the person signs in.
+  if (env.HARNESS_SELF_HOSTED && !env.HARNESS_LOCAL_ONLY && !readAuthSession()) {
     try { await enrollSelfHosted() } catch (err) {
       console.error(`\n  ✗ ${err instanceof Error ? err.message : String(err)}\n`)
       process.exit(1)

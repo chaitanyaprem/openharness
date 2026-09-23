@@ -21,6 +21,8 @@ export function enrollMessage(nonce: string, computerId: string, pubkey: string)
 }
 
 export async function enrollSelfHosted(opts: { force?: boolean; fetchImpl?: typeof fetch } = {}): Promise<AuthSession> {
+  // Only a session this relay issued comes back here (readAuthSession checks `relay`). A sign-in
+  // from the upstream relay, or an enrollment with another self-hosted one, is replaced.
   const existing = readAuthSession()
   if (existing && !opts.force) return existing
   const fetchImpl = opts.fetchImpl ?? fetch
@@ -61,6 +63,7 @@ export async function enrollSelfHosted(opts: { force?: boolean; fetchImpl?: type
     computerId,
     machineId: body.data.machineId,
     updatedAt: Date.now(),
+    relay: env.BACKEND_WS_URL,
   }
   writeAuthSession(session)
   return session

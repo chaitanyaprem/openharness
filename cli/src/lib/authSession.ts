@@ -12,6 +12,9 @@ export interface AuthSession {
   computerId: string
   machineId?: string
   updatedAt: number
+  /** The relay a self-hosted enrollment was issued by (its BACKEND_WS_URL). Absent on an SSO session.
+   *  A session is only read back while the CLI points at that same relay, see readAuthSession. */
+  relay?: string
   /** Never on disk. Set only on the in-memory identity a HARNESS_LOCAL_ONLY daemon runs on, so the
    *  daemon can tell an account-free run from a signed-in one whose machine is not resolved yet. */
   local?: true
@@ -46,12 +49,25 @@ function parse(raw: string): AuthSession | null {
       computerId: value.computerId,
       ...(typeof value.machineId === 'string' && value.machineId ? { machineId: value.machineId } : {}),
       updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : 0,
+      ...(typeof value.relay === 'string' && value.relay ? { relay: value.relay } : {}),
     }
   } catch { return null }
 }
 
+/**
+ * Does this session belong to the relay the CLI is configured for? A self-hosted session carries
+ * the relay that issued it; an SSO session carries none. Handing one to the other only gets the
+ * token refused, and the daemon would retry it forever, so a mismatch reads as no session at all.
+ */
+export function sessionMatchesRelay(session: AuthSession): boolean {
+  if (env.HARNESS_SELF_HOSTED) return session.relay === env.BACKEND_WS_URL
+  return session.relay == null
+}
+
 export function readAuthSession(): AuthSession | null {
-  try { return parse(readFileSync(AUTH_SESSION_FILE, 'utf8')) } catch { return null }
+  let session: AuthSession | null
+  try { session = parse(readFileSync(AUTH_SESSION_FILE, 'utf8')) } catch { return null }
+  return session && sessionMatchesRelay(session) ? session : null
 }
 
 export function hasAuthSession(): boolean { return readAuthSession() !== null }

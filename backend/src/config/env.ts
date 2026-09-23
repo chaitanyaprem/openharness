@@ -134,7 +134,7 @@ const envSchema = z.object({
   // Shared bootstrap secret. Possession enrolls a machine. Optional when HARNESS_PUBKEY_ALLOWLIST
   // names the machine's Ed25519 pubkey. Treat it like a root password.
   HARNESS_ENROLLMENT_TOKEN: z.string().optional(),
-  // Newline-separated Ed25519 public keys (standard base64 or hex), '#' comments allowed.
+  // Path to a file of Ed25519 public keys, one per line (standard base64 or hex), '#' comments allowed.
   HARNESS_PUBKEY_ALLOWLIST: z.string().optional(),
   // Ceiling on billing-free Remote machines auto-created by the device-auth grant
   // (`harness auth device`). That path is free and its computer id is self-declared, so this caps the
