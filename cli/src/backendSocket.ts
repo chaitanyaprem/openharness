@@ -81,6 +81,7 @@ import { agyMessagesToEvents } from './engines/agy/normalizer.js'
 import { copilotMessagesToEvents } from './engines/copilot/normalizer.js'
 import { ampThreadToEvents, readAmpThread } from './engines/amp/threadExport.js'
 import { piMessagesToEvents, windowPiLines } from './engines/pi/normalizer.js'
+import { ompMessagesToEvents, windowOmpLines } from './engines/omp/normalizer.js'
 import { commandcodeMessagesToEvents, windowCommandCodeLines } from './engines/commandcode/normalizer.js'
 import { hermesMessagesToEvents, windowHermesMessages } from './engines/hermes/normalizer.js'
 import { devinMessagesToEvents, windowDevinMessages } from './engines/devin/normalizer.js'
@@ -1745,10 +1746,12 @@ export class BackendSocket {
                     ? copilotHistoryPage(lines, false).events
                   : s.engine === 'pi'
                   ? piMessagesToEvents(lines)
+                  : s.engine === 'omp'
+                  ? ompMessagesToEvents(lines)
                   : s.engine === 'commandcode'
                     ? commandcodeMessagesToEvents(lines)
                     : messagesToEvents(lines)
-            if (s.engine !== 'cursor' && s.engine !== 'pi' && s.engine !== 'commandcode' && s.engine !== 'muse' && s.engine !== 'amp' && s.engine !== 'grok' && s.engine !== 'agy' && s.engine !== 'copilot') await enrichSubagentStats(fullEvents, s.transcriptPath)
+            if (s.engine !== 'cursor' && s.engine !== 'pi' && s.engine !== 'omp' && s.engine !== 'commandcode' && s.engine !== 'muse' && s.engine !== 'amp' && s.engine !== 'grok' && s.engine !== 'agy' && s.engine !== 'copilot') await enrichSubagentStats(fullEvents, s.transcriptPath)
             reply(type, requestId, {
               id: sessionId,
               title: projectDisplayName(s),
@@ -1795,6 +1798,8 @@ export class BackendSocket {
               ? windowCursorLines(lines, { limit, before })
               : s.engine === 'pi'
                 ? windowPiLines(lines, { limit, before })
+              : s.engine === 'omp'
+                ? windowOmpLines(lines, { limit, before })
                 : s.engine === 'commandcode'
                   ? windowCommandCodeLines(lines, { limit, before })
                   : windowRawLines(lines, { limit, before })
@@ -1814,11 +1819,13 @@ export class BackendSocket {
                 )
               : s.engine === 'pi'
                 ? piMessagesToEvents(w.window)
+              : s.engine === 'omp'
+                ? ompMessagesToEvents(w.window)
                 : s.engine === 'commandcode'
                   ? commandcodeMessagesToEvents(w.window)
                   : messagesToEvents(w.window)
           // muse and amp are answered above and never reach here, so both are absent by design.
-          if (s.engine !== 'cursor' && s.engine !== 'pi' && s.engine !== 'commandcode') await enrichSubagentStats(events, s.transcriptPath)
+          if (s.engine !== 'cursor' && s.engine !== 'pi' && s.engine !== 'omp' && s.engine !== 'commandcode') await enrichSubagentStats(events, s.transcriptPath)
           // Older pages must not inject a spurious end-of-transcript marker mid-scroll.
           if (before && events[events.length - 1]?.type === 'done') events.pop()
           reply(type, requestId, {

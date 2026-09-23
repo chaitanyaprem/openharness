@@ -791,6 +791,99 @@ export function installPiExtension(port: number): void {
   }
 }
 
+const OMP_EXTENSION_PATH = join(env.OMP_HOME, 'agent', 'extensions', 'launcher-register.ts')
+
+/**
+ * Oh My Pi's discovery extension: pi's, re-measured on omp 18.2.6 rather than inherited.
+ *
+ * - Same loader and API: omp loads global extensions from <OMP_HOME>/agent/extensions, exposes
+ *   `session_start`/`turn_start`/`turn_end` and `ctx.sessionManager.getSessionFile()/getSessionId()`.
+ * - No type import. Pi's names `@earendil-works/pi-coding-agent`, which omp does not ship; omp's is
+ *   `@oh-my-pi/pi-coding-agent`. Nothing here needs the types.
+ * - Only the root session registers. omp runs sub-agents and print-mode runs through the same
+ *   extensions, with the pane's environment; registering one would bind the pane to the sub-agent.
+ *   `ctx.hasUI === true` is the root session, the test herdr's own omp integration uses.
+ * - `session_switch` (a /resume or /new inside a running omp) registers the new session. Pi has no
+ *   such event.
+ */
+function ompExtensionSource(port: number): string {
+  return `// session-register — auto-installed by the machine adapter. Binds this Oh My Pi session to the local
+// machine daemon (127.0.0.1:${port}) so it can be mirrored to web/device. No-op if machine isn't running.
+// @ts-nocheck
+import { existsSync, readFileSync } from "node:fs";
+
+export default function (pi) {
+  let announced = false;   // posted at least once (the transcript may not exist yet)
+  let registered = false;  // posted with a real, on-disk transcript — nothing left to do
+
+  const register = async (ctx) => {
+    if (ctx?.hasUI !== true) return; // a sub-agent or a print-mode run, not the pane's own session
+    const pane = process.env.TMUX_PANE;
+    const herdrPane = process.env.HERDR_PANE_ID;
+    let token = "";
+    try { token = readFileSync(${JSON.stringify(join(env.ADAPTER_DATA_DIR, 'hook-credential'))}, "utf8").trim(); } catch {}
+    if ((!pane && !herdrPane) || !token) return;
+    // The daemon validates the transcript path, and the file may not be on disk yet: announce without
+    // one first and attach the real path on a later turn.
+    const file = ctx?.sessionManager?.getSessionFile?.() ?? null;
+    const ready = !!file && existsSync(file);
+    if (registered || (announced && !ready)) return;
+    const sessionId = ctx?.sessionManager?.getSessionId?.();
+    if (!sessionId) return;
+    try {
+      const res = await fetch("http://127.0.0.1:${port}/api/hook/session-start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-harness-hook-token": token },
+        body: JSON.stringify({
+          engine: "omp",
+          pluginVersion: ${JSON.stringify(VERSION)},
+          sessionId,
+          transcriptPath: ready ? file : undefined,
+          cwd: ctx?.cwd ?? undefined,
+          tmuxPane: pane,
+          callerPid: process.pid,
+          runtimeHints: [
+            ...(pane ? [{ backend: "tmux", paneId: pane }] : []),
+            ...(herdrPane ? [{ backend: "herdr", paneId: herdrPane, sessionName: process.env.HERDR_SESSION, socketPath: process.env.HERDR_SOCKET_PATH }] : []),
+          ],
+        }),
+      });
+      if (!res.ok) return; // daemon refused (e.g. transcript not readable yet) — retry on the next turn
+      announced = true;
+      if (ready) registered = true;
+    } catch {}
+  };
+
+  pi.on("session_start", async (_event, ctx) => { await register(ctx); });
+  pi.on("turn_start", async (_event, ctx) => { await register(ctx); });
+  pi.on("turn_end", async (_event, ctx) => { await register(ctx); });
+  // A different conversation in the same process: start over for it.
+  pi.on("session_switch", async (_event, ctx) => { announced = false; registered = false; await register(ctx); });
+}
+`
+}
+
+/** Idempotently drop the Oh My Pi discovery extension into <OMP_HOME>/agent/extensions/. */
+export function installOmpExtension(port: number): void {
+  const source = ompExtensionSource(port)
+  try {
+    if (existsSync(OMP_EXTENSION_PATH) && readFileSync(OMP_EXTENSION_PATH, 'utf-8') === source) {
+      console.log('[hooks] Oh My Pi discovery extension already installed')
+      return
+    }
+  } catch { /* unreadable — rewrite it */ }
+  try {
+    mkdirSync(dirname(OMP_EXTENSION_PATH), { recursive: true })
+    const tmp = `${OMP_EXTENSION_PATH}.${process.pid}.tmp`
+    writeFileSync(tmp, source)
+    renameSync(tmp, OMP_EXTENSION_PATH)
+    console.log(`[hooks] installed Oh My Pi discovery extension → ${OMP_EXTENSION_PATH}`)
+    console.log('[hooks] (takes effect on the next omp session start)')
+  } catch (err) {
+    console.error('[hooks] failed to write Oh My Pi extension:', err)
+  }
+}
+
 const AMP_PLUGIN_PATH = join(env.AMP_PLUGIN_DIR, 'launcher-register.ts')
 
 /**

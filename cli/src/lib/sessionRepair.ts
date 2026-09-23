@@ -18,6 +18,7 @@ import { open, readdir, readFile, realpath, stat } from 'fs/promises'
 import { basename, dirname, join, sep } from 'path'
 import { env } from '../config/env.js'
 import { museEvent, museWorkspaceRoot } from '../engines/muse/normalizer.js'
+import { ompSessionMeta } from '../engines/omp/normalizer.js'
 import type { AgentEngine } from '../engines/types.js'
 import { readCodexRolloutMeta, resolveCodexRollout } from '../engines/codex/rollout.js'
 import { agyConversationForPid, findAgyTranscript } from '../engines/agy/session.js'
@@ -259,6 +260,17 @@ export async function findLiveSession(
       }, opts)
     case 'pi':
       return fileEngineSession(join(env.PI_HOME, 'agent', 'sessions'), cwd, startedAtMs, readTranscriptMeta, opts)
+    case 'omp': {
+      // Sub-agent transcripts share the parent's cwd and live inside its session directory
+      // (sessions/<dir>/<parent>/<Name>.jsonl), so only files exactly one directory below the root count.
+      // The id comes from the header: a sub-agent's file name is its agent name, not an id.
+      const root = join(env.OMP_HOME, 'agent', 'sessions')
+      return fileEngineSession(root, cwd, startedAtMs, async (path) => {
+        if (dirname(dirname(path)) !== root) return null
+        const meta = ompSessionMeta((await readFile(path, 'utf-8')).slice(0, 256 * 1024).split('\n', 20))
+        return meta?.cwd ? { cwd: meta.cwd, sessionId: meta.id } : null
+      }, opts)
+    }
     case 'commandcode':
       return fileEngineSession(join(env.COMMANDCODE_HOME, 'projects'), cwd, startedAtMs, readTranscriptMeta, opts)
     case 'muse':

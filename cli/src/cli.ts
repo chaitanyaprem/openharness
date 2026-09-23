@@ -48,7 +48,7 @@ import { DeviceLink } from './device/deviceLink.js'
 import { DeviceFleet } from './device/deviceFleet.js'
 import { registry, projectDisplayName, sessionDisplayTitle, type RegisteredSession } from './lib/registry.js'
 import { engineSessionTitle } from './lib/sessionTitle.js'
-import { installAmpPlugin, installCodexHooks, installCommandCodeHooks, installCursorHooks, installDevinHooks, installGrokHooks, installAgyHooks, installCopilotHooks, installHermesHooks, installKiloPlugin, installOpencodePlugin, installPiExtension, installSessionHooks } from './lib/hooks.js'
+import { installAmpPlugin, installCodexHooks, installCommandCodeHooks, installCursorHooks, installDevinHooks, installGrokHooks, installAgyHooks, installCopilotHooks, installHermesHooks, installKiloPlugin, installOpencodePlugin, installOmpExtension, installPiExtension, installSessionHooks } from './lib/hooks.js'
 import { PID_FILE, daemonPort, isAlive, isDaemonRunning, readPid } from './lib/daemonState.js'
 import {
   BIND_WAIT_MS, connectFailure, defaultLaunchDeps, removePidFileIf, waitForBind, waitForReady,
@@ -203,6 +203,7 @@ import { agyPaneIdle } from './engines/agy/runtimeProfile.js'
 import { CopilotNormalizer, copilotHistoryTurnOpen, lastCopilotTurnText } from './engines/copilot/normalizer.js'
 import { copilotSessionForPid, findCopilotTranscript } from './engines/copilot/session.js'
 import { PiNormalizer, lastPiTurnText } from './engines/pi/normalizer.js'
+import { OmpNormalizer, lastOmpTurnText } from './engines/omp/normalizer.js'
 import { HermesReader, readHermesMessages } from './engines/hermes/reader.js'
 import { hermesDbForSession } from './lib/hermesHome.js'
 import { DevinReader, readDevinMessages } from './engines/devin/reader.js'
@@ -1930,6 +1931,7 @@ async function runForeground(session: AuthSession): Promise<void> {
    */
   const replayedFirstTurn = new Set<string>()
   const piNormalizers = new Map<string, PiNormalizer>()
+  const ompNormalizers = new Map<string, OmpNormalizer>()
   const museNormalizers = new Map<string, MuseNormalizer>()
   const ampNormalizers = new Map<string, AmpNormalizer>()
   const grokNormalizers = new Map<string, GrokNormalizer>()
@@ -1946,6 +1948,7 @@ async function runForeground(session: AuthSession): Promise<void> {
       ?? opencodeReaders.get(sessionId)?.turnOpen
       ?? kiloReaders.get(sessionId)?.turnOpen
       ?? piNormalizers.get(sessionId)?.turnOpen
+      ?? ompNormalizers.get(sessionId)?.turnOpen
       ?? museNormalizers.get(sessionId)?.turnOpen
       ?? ampNormalizers.get(sessionId)?.turnOpen
       ?? grokNormalizers.get(sessionId)?.turnOpen
@@ -2043,6 +2046,7 @@ async function runForeground(session: AuthSession): Promise<void> {
       || opencodeReaders.has(session.sessionId)
       || kiloReaders.has(session.sessionId)
       || piNormalizers.has(session.sessionId)
+      || ompNormalizers.has(session.sessionId)
       || museNormalizers.has(session.sessionId)
       || ampNormalizers.has(session.sessionId)
       || grokNormalizers.has(session.sessionId)
@@ -2179,6 +2183,11 @@ async function runForeground(session: AuthSession): Promise<void> {
       // Hydrate state silently; never replay history live — except a turn left open, below.
       historyTurnOpen = fold((line) => normalizer.ingest(line), () => normalizer.turnOpen)
       piNormalizers.set(session.sessionId, normalizer)
+    } else if (session.engine === 'omp') {
+      const normalizer = new OmpNormalizer('live')
+      // Same as pi: hydrate state silently, never replay history live.
+      historyTurnOpen = fold((line) => normalizer.ingest(line), () => normalizer.turnOpen)
+      ompNormalizers.set(session.sessionId, normalizer)
     } else if (session.engine === 'hermes') {
       // Hermes has no transcript file — poll its SQLite store, like opencode.
       const reader = new HermesReader({
@@ -2519,6 +2528,7 @@ async function runForeground(session: AuthSession): Promise<void> {
       if (s.engine === 'agy') return lastAgyTurnText(lines)
       if (s.engine === 'copilot') return lastCopilotTurnText(lines)
       if (s.engine === 'pi') return lastPiTurnText(lines)
+      if (s.engine === 'omp') return lastOmpTurnText(lines)
       if (s.engine === 'commandcode') return lastCommandCodeTurnText(lines)
       return lastTurnTextFromRawLines(lines)
     },
@@ -2726,6 +2736,7 @@ async function runForeground(session: AuthSession): Promise<void> {
     // stale "already replayed" and lose a first turn it was entitled to.
     replayedFirstTurn.delete(sessionId)
     piNormalizers.delete(sessionId)
+    ompNormalizers.delete(sessionId)
     museNormalizers.delete(sessionId)
     ampNormalizers.delete(sessionId)
     grokNormalizers.delete(sessionId)
@@ -3968,6 +3979,7 @@ async function runForeground(session: AuthSession): Promise<void> {
     })
     installKiloPlugin(hookPort)
     installPiExtension(hookPort)
+    installOmpExtension(hookPort)
     // A self-update refreshes plugin files here; running engine processes pick them up according to each
     // vendor's own plugin reload lifecycle.
     installAmpPlugin(hookPort)
@@ -4031,6 +4043,10 @@ async function runForeground(session: AuthSession): Promise<void> {
     } else if (session.engine === 'pi') {
       let normalizer = piNormalizers.get(evt.sessionId)
       if (!normalizer) { normalizer = new PiNormalizer('live'); piNormalizers.set(evt.sessionId, normalizer) }
+      events = normalizer.ingest(evt.text)
+    } else if (session.engine === 'omp') {
+      let normalizer = ompNormalizers.get(evt.sessionId)
+      if (!normalizer) { normalizer = new OmpNormalizer('live'); ompNormalizers.set(evt.sessionId, normalizer) }
       events = normalizer.ingest(evt.text)
     } else if (session.engine === 'commandcode') {
       let normalizer = commandcodeNormalizers.get(evt.sessionId)
@@ -4370,6 +4386,7 @@ async function runForeground(session: AuthSession): Promise<void> {
     cursorNormalizers.get(sessionId)?.closeTurn()
     opencodeReaders.get(sessionId)?.closeTurn()
     piNormalizers.get(sessionId)?.closeTurn()
+    ompNormalizers.get(sessionId)?.closeTurn()
     museNormalizers.get(sessionId)?.closeTurn()
     ampNormalizers.get(sessionId)?.closeTurn()
     grokNormalizers.get(sessionId)?.closeTurn()

@@ -115,6 +115,16 @@ const _engines = <String, EngineIdentity>{
     homepage: 'https://pi.dev',
     blurb: "A small, extensible coding agent for the terminal.",
   ),
+  // No icon ships for it yet, so the tile draws its initial.
+  'omp': EngineIdentity(
+    id: 'omp',
+    label: 'Oh My Pi',
+    category: 'Code',
+    creator: 'can1357',
+    color: Color(0xffb58cff),
+    homepage: 'https://github.com/can1357/oh-my-pi',
+    blurb: "A fork of the Pi coding agent for the terminal.",
+  ),
   'hermes': EngineIdentity(
     id: 'hermes',
     label: 'Hermes',

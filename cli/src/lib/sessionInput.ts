@@ -485,7 +485,7 @@ export class SessionInputController {
       ? CLAUDE_SUBMIT_VERIFY_MS
       : session.engine === 'opencode'
         ? OPENCODE_SUBMIT_VERIFY_MS
-        : session.engine === 'pi'
+        : session.engine === 'pi' || session.engine === 'omp' // omp: pi's fork; its window is not measured yet
           ? PI_SUBMIT_VERIFY_MS
           : session.engine === 'hermes'
             ? HERMES_SUBMIT_VERIFY_MS
@@ -535,7 +535,7 @@ export class SessionInputController {
         this.deps.onError(sessionId, 'The agent did not accept the message. Please try again.')
         return
       }
-    } else if (session.engine === 'opencode' || session.engine === 'kilo' || session.engine === 'pi' || session.engine === 'hermes' || session.engine === 'muse'
+    } else if (session.engine === 'opencode' || session.engine === 'kilo' || session.engine === 'pi' || session.engine === 'omp' || session.engine === 'hermes' || session.engine === 'muse'
       || session.engine === 'amp' || session.engine === 'grok' || session.engine === 'agy' || session.engine === 'copilot') {
       // OpenCode has no composer glyph, and the submitted text stays visible in the message area, so a
       // pane scrape can't tell "still in the composer" from "already sent". Rely purely on the reader-

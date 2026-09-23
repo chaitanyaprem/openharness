@@ -35,6 +35,7 @@ import {
   runGrokOneShot,
   runAgyOneShot,
   runCopilotOneShot,
+  runOmpOneShot,
   setOneShotPoolActiveCounts,
   setOneShotPoolDeviceConnected,
   shutdownOneShotPool,
@@ -72,6 +73,7 @@ export function syncSummaryPoolSessions(sessions: Array<{ engine: AgentEngine }>
     // so they cannot be pre-warmed the way a stdin-fed CLI can — no pooled worker for them.
     if (session.engine === 'hermes' || session.engine === 'devin' || session.engine === 'muse'
       || session.engine === 'amp' || session.engine === 'grok' || session.engine === 'agy' || session.engine === 'copilot'
+      || session.engine === 'omp' // runOmpOneShot starts one process per recap; no pooled worker
       || session.engine === 'terminal') continue
     counts[session.engine]++
   }
@@ -424,6 +426,8 @@ export async function summarizeTurnText(
                           ? env.AGY_SUMMARY_MODEL
                           : engine === 'copilot'
                             ? env.COPILOT_SUMMARY_MODEL
+                            : engine === 'omp'
+                              ? env.OMP_SUMMARY_MODEL
                       : env.OPENCODE_SUMMARY_MODEL
   const effort = engine === 'cursor' ? 'model-defined' : env.SUMMARY_EFFORT
   console.log(
@@ -457,6 +461,8 @@ export async function summarizeTurnText(
                           ? runAgyOneShot
                           : engine === 'copilot'
                             ? runCopilotOneShot
+                            : engine === 'omp'
+                              ? runOmpOneShot
                       : runOpencodeOneShot
   // One shape for both paths so the language-drift retry and the headline cap below stay single-source.
   const run: (options: OneShotOptions) => Promise<{ text: string; sessionId: string | null }> = gatewayKey

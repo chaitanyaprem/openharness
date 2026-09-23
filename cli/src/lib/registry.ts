@@ -637,12 +637,17 @@ export function validTranscriptPath(engine: AgentEngine, filePath: string, codex
           ? join(env.CURSOR_HOME, 'projects')
           : engine === 'pi'
             ? join(env.PI_HOME, 'agent', 'sessions')
+          : engine === 'omp'
+            ? join(env.OMP_HOME, 'agent', 'sessions')
             : engine === 'commandcode'
               ? join(env.COMMANDCODE_HOME, 'projects')
               : env.CLAUDE_PROJECTS_DIR,
     )
     const st = statSync(actual)
     if (!st.isFile() || !isWithin(root, actual)) return false
+    // omp keeps sub-agent transcripts INSIDE the parent's session: sessions/<dir>/<parent>/<Name>.jsonl.
+    // A main session is always sessions/<dir>/<file>.jsonl, so anything deeper is not one.
+    if (engine === 'omp' && dirname(dirname(actual)) !== root) return false
     if (engine === 'cursor') {
       const id = basename(actual).replace(/\.jsonl$/, '')
       if (!id || basename(dirname(actual)) !== id || basename(dirname(dirname(actual))) !== 'agent-transcripts') return false
@@ -861,7 +866,7 @@ class Registry {
           continue
         }
         if (
-          (bound && engine !== 'cursor' && engine !== 'opencode' && engine !== 'kilo' && engine !== 'pi' && engine !== 'hermes' && engine !== 'commandcode' && engine !== 'devin' && !transcriptPath)
+          (bound && engine !== 'cursor' && engine !== 'opencode' && engine !== 'kilo' && engine !== 'pi' && engine !== 'omp' && engine !== 'hermes' && engine !== 'commandcode' && engine !== 'devin' && !transcriptPath)
           || (bound && transcriptPath !== null && !validTranscriptPath(engine, transcriptPath, rawCodexHome))
         ) {
           bound = false
@@ -1301,7 +1306,7 @@ class Registry {
       || (engine === 'agy' && !GROK_SESSION_RE.test(sessionId))
       // Copilot's session id is a uuid and names the directory its event stream lives in.
       || (engine === 'copilot' && !GROK_SESSION_RE.test(sessionId))
-      || (engine !== 'cursor' && engine !== 'opencode' && engine !== 'kilo' && engine !== 'pi' && engine !== 'hermes' && engine !== 'commandcode' && engine !== 'devin' && engine !== 'grok' && engine !== 'agy' && engine !== 'copilot' && !transcriptPath)
+      || (engine !== 'cursor' && engine !== 'opencode' && engine !== 'kilo' && engine !== 'pi' && engine !== 'omp' && engine !== 'hermes' && engine !== 'commandcode' && engine !== 'devin' && engine !== 'grok' && engine !== 'agy' && engine !== 'copilot' && !transcriptPath)
       // The already-registered agent (opened at agent_create time) already carries its own
       // CODEX_HOME profile, if it has one other than the default — see RegisteredSession.codexHome.
       || (transcriptPath && !validTranscriptPath(engine, transcriptPath, processAgent?.codexHome ?? undefined))

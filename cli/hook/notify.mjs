@@ -1152,7 +1152,7 @@ function mergeRuntimes(current, observed) {
 
 const REGISTRY_ENGINES = new Set([
   'claude', 'codex', 'cursor', 'opencode', 'pi', 'hermes', 'commandcode', 'devin', 'muse', 'amp', 'kilo', 'grok',
-  'agy', 'copilot',
+  'agy', 'copilot', 'omp',
 ])
 
 function validRegistryString(value, max = 4096) {
@@ -1248,7 +1248,7 @@ async function fallbackRegister(input, engine, tmuxPane) {
     ? rawSessionId
     : (transcriptPath ? basename(transcriptPath).replace(/\.jsonl$/, '') : '')
   if (!sessionId) return
-  const transcriptOptional = ['cursor', 'opencode', 'kilo', 'pi', 'hermes', 'commandcode', 'devin', 'grok', 'agy', 'copilot'].includes(engine)
+  const transcriptOptional = ['cursor', 'opencode', 'kilo', 'pi', 'omp', 'hermes', 'commandcode', 'devin', 'grok', 'agy', 'copilot'].includes(engine)
   if (!transcriptOptional && !transcriptPath) return
   if (transcriptPath && !validTranscriptPath(engine, transcriptPath, p)) return
   const observations = []

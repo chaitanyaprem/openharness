@@ -91,6 +91,19 @@ fails silently if inherited unchanged:
   only by opencode's stop rule, that turn never closes: the device tile spins forever and no recap
   runs. The refusal itself had to become a boundary.
 
+Oh My Pi (`omp`) is pi's fork and `engines/omp/` is a copy of `engines/pi/` on the same terms. Its
+message records match pi's, but four things around them did not:
+
+- **A skill starts a turn with no user record.** omp writes a displayed `custom_message`
+  (`skill-prompt`) and the assistant answers it. Read with pi's rule, that whole turn was invisible.
+- **Sub-agents write their own transcripts inside the parent's session directory**, with the parent's
+  cwd. A directory scan that walks into them binds the pane to a sub-agent or finds two candidates and
+  binds nothing. Only files directly under `sessions/<dir>/` are main sessions.
+- **Sub-agents run the extension too.** The discovery extension registers only when `ctx.hasUI` is
+  true, the test herdr's own omp integration uses.
+- **omp has approval prompts** (`--approval-mode`, `--auto-approve`), where pi has none. No parser is
+  written for them yet.
+
 Two of those (the catalog and the footer) would have shipped as "working" under any test written from
 the parent engine's fixtures. So: inherit the *structure*, measure the *values*. And where a fork's
 directory layout matches, check the ENV OVERRIDES separately — kilo honours `XDG_DATA_HOME` and
@@ -271,6 +284,7 @@ entrypoint rules remain fallbacks for launchers that exec an interpreter or rewr
 | Grok | installed/downloaded image; `~/.grok` layout; file-owned legacy `agent` alias |
 | AGY | native `~/.local/bin/agy`; explicitly rejects the IDE `.app` binary |
 | Copilot | installed native image; `@github/copilot` npm loader/entrypoint |
+| Oh My Pi | native `omp` image (`~/.local/bin/omp`); the bun-package install is not measured |
 
 Never add a bare version or generic executable name as proof. When file identities conflict, leave the
 pane ambiguous rather than registering the wrong engine. A pane-scoped hook may resolve an otherwise

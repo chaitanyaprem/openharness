@@ -371,6 +371,12 @@ export const ENGINE_PROCESS_SIGNATURES: Readonly<Record<RegisteredSession['engin
     basenames: [/^pi$/],
     entrypoints: [/pi-coding-agent[\/\\]dist[\/\\]cli\.js$/],
   },
+  // Oh My Pi ships a native binary (~/.local/bin/omp, a Mach-O on macOS), so its process is `omp`. No
+  // package entrypoint is listed: the bun-package install was not measured.
+  omp: {
+    basenames: [/^omp$/],
+    entrypoints: [],
+  },
   hermes: {
     basenames: [/^hermes$/, /^hermes-agent$/],
     entrypoints: [/hermes-agent[\/\\]hermes$/, /(?:^|[\/\\])hermes_cli(?:[\/\\]|\.|$)/],
@@ -580,6 +586,9 @@ const RESUME_ARGS: Partial<Record<RegisteredSession['engine'], { flags: string[]
   // writes a NEW session, so the id in argv is the parent's and would bind the agent to the wrong row.
   kilo: { flags: ['--session', '-s'], id: /^ses_[A-Za-z0-9]+$/ },
   pi: { flags: ['--session', '--session-id'], id: /^[0-9a-f][0-9a-f-]{7,}$/i },
+  // `omp -r/--resume <id>`; omp ids are UUIDv7 (`019f4ced-d053-7000-a56e-218958cd52c4`) and a prefix
+  // also resumes. `-c/--continue` names nothing and falls through to the scan in sessionRepair.
+  omp: { flags: ['--resume', '-r'], id: /^[0-9a-f][0-9a-f-]{7,}$/i },
   // Hermes ids are timestamps: 20260728_115628_f2c86a.
   hermes: { flags: ['--resume'], id: /^\d{8}_\d{6}_[0-9a-z]+$/i },
   commandcode: { flags: ['--resume', '-r', '--session'], id: /^[0-9a-f-]{16,}$/i },

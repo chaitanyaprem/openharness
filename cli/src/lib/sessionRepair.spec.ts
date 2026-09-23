@@ -504,3 +504,51 @@ describe('hermes repair across profile homes', () => {
     expect(await findLiveSession('hermes', CWD, STARTED_AT, { bornOnly: true })).toBeNull()
   })
 })
+
+describe('session repair — Oh My Pi', () => {
+  afterEach(() => { delete process.env.OMP_HOME })
+
+  /** `<OMP_HOME>/agent/sessions/<dir>/<file>.jsonl`, opening with the title line and then the header. */
+  function writeOmpFile(home: string, rel: string, id: string, cwd: string, mtimeMs: number): string {
+    const file = join(home, 'agent', 'sessions', rel)
+    mkdirSync(join(file, '..'), { recursive: true })
+    const lines = [
+      JSON.stringify({ type: 'title', v: 1, title: 'x', pad: '   ' }),
+      JSON.stringify({ type: 'session', version: 3, id, cwd }),
+    ]
+    writeFileSync(file, `${lines.join('\n')}\n`)
+    utimesSync(file, new Date(mtimeMs), new Date(mtimeMs))
+    return file
+  }
+
+  async function loadOmp(ompHome: string) {
+    vi.resetModules()
+    process.env.OMP_HOME = ompHome
+    return import('./sessionRepair.js')
+  }
+
+  it('binds the main session, not the sub-agent transcripts that share its directory and cwd', async () => {
+    const home = tempRoot()
+    const parent = '2026-08-03T09-00-01-000Z_019f4ced-d053-7000-a56e-218958cd52c4'
+    const main = writeOmpFile(home, `-work/${parent}.jsonl`, '019f4ced-d053-7000-a56e-218958cd52c4', CWD, STARTED_AT + 5_000)
+    // Measured layout: sub-agents live INSIDE the parent's session directory, named by agent.
+    writeOmpFile(home, `-work/${parent}/Scout.jsonl`, '019f4cf6-467b-7000-9974-baec37f2ac61', CWD, STARTED_AT + 9_000)
+    const { findLiveSession } = await loadOmp(home)
+
+    await expect(findLiveSession('omp', CWD, STARTED_AT)).resolves.toEqual({
+      sessionId: '019f4ced-d053-7000-a56e-218958cd52c4',
+      transcriptPath: main,
+    })
+  })
+
+  it('takes the cwd from the header, not the directory name', async () => {
+    // A /tmp session is filed under `--private-tmp--` while its header says `/tmp`.
+    const home = tempRoot()
+    writeOmpFile(home, '--private-tmp--/2026-08-03T09-00-02-000Z_019f70ec-6cef-7000-a4e7-faec2297840f.jsonl',
+      '019f70ec-6cef-7000-a4e7-faec2297840f', '/tmp/omp-probe', STARTED_AT + 5_000)
+    const { findLiveSession } = await loadOmp(home)
+
+    await expect(findLiveSession('omp', '/tmp/omp-probe', STARTED_AT))
+      .resolves.toMatchObject({ sessionId: '019f70ec-6cef-7000-a4e7-faec2297840f' })
+  })
+})

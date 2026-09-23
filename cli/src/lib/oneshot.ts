@@ -1576,6 +1576,72 @@ export function runPiOneShot(opts: OneShotOptions): Promise<OneShotResult> {
   return pool.run('pi', opts)
 }
 
+function ompBin(): string {
+  return env.OMP_PATH || 'omp'
+}
+
+/**
+ * Oh My Pi recap. One process per recap, outside the warm pool. `omp -p` reads its prompt from stdin
+ * (measured on omp 18.2.6: `--mode json` echoed a stdin sentinel in the user message), so a pooled
+ * worker would work the way pi's does; this starts simpler.
+ *
+ * Flags: `--no-session` keeps the recap out of `~/.omp/agent/sessions`; `--no-extensions` stops the
+ * machine's discovery extension registering the recap as an agent; the rest keep it to one plain
+ * completion (no tools, LSP, skills, rules, or title generation).
+ */
+export function runOmpOneShot(opts: OneShotOptions): Promise<OneShotResult> {
+  const aborted = (): Error => Object.assign(new Error('omp one-shot aborted'), { name: 'AbortError' })
+  if (opts.signal?.aborted) return Promise.reject(aborted())
+  const args = [
+    '-p', '--no-session', '--no-extensions', '--no-tools', '--no-lsp', '--no-skills', '--no-rules', '--no-title',
+    ...(opts.model ? ['--model', opts.model] : []),
+  ]
+  const processEnv = scrubTerminalContext({ ...oneShotParentEnv() })
+  const timeoutMs = opts.timeoutMs ?? 60_000
+
+  return new Promise<OneShotResult>((resolve, reject) => {
+    const child = spawn(ompBin(), args, {
+      cwd: opts.cwd, env: processEnv, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      opts.signal?.removeEventListener('abort', onAbort)
+      fn()
+    }
+    const kill = (): void => {
+      if (child.pid == null || child.exitCode != null) return
+      try { process.kill(-child.pid, 'SIGKILL') } catch { try { child.kill('SIGKILL') } catch { /* gone */ } }
+    }
+    const onAbort = (): void => {
+      finish(() => reject(aborted()))
+      kill()
+    }
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error(`omp one-shot timed out after ${timeoutMs}ms`)))
+      kill()
+    }, timeoutMs)
+    opts.signal?.addEventListener('abort', onAbort)
+
+    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    child.stdin?.on('error', (err) => finish(() => reject(err)))
+    child.on('error', (err) => finish(() => reject(err)))
+    child.on('close', (code) => {
+      const text = stdout.trim()
+      finish(() => {
+        if (!text && code !== 0) reject(new Error(`omp one-shot exited ${code}: ${stderr.slice(0, 500)}`))
+        else resolve({ text, sessionId: null })
+      })
+    })
+    try { child.stdin?.end(opts.prompt) } catch (err) { finish(() => reject(err)) }
+  })
+}
+
 export function runOpencodeOneShot(opts: OneShotOptions): Promise<OneShotResult> {
   if (opts.signal?.aborted) return Promise.reject(abortError('opencode'))
   if (!config || config.cwd !== opts.cwd || config.opencodeModel !== opts.model) {

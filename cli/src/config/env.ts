@@ -184,6 +184,10 @@ const envSchema = z.object({
   // Pi state root. Session transcripts live under <PI_HOME>/agent/sessions/--<mangled-cwd>--/*.jsonl and
   // the adapter's discovery extension is installed into <PI_HOME>/agent/extensions.
   PI_HOME: z.string().default(join(homedir(), '.pi')),
+  // Oh My Pi (pi's fork) state root. Same shape as pi's: transcripts under <OMP_HOME>/agent/sessions/<dir>/
+  // *.jsonl and the discovery extension in <OMP_HOME>/agent/extensions. The session dir names differ from
+  // pi's (engines/omp/reader.ts). omp also reads PI_CODING_AGENT_DIR, which this setting does not follow.
+  OMP_HOME: z.string().default(join(homedir(), '.omp')),
   // Hermes state root — the SQLite store is <HERMES_HOME>/state.db and the shell hooks the adapter
   // installs live in <HERMES_HOME>/config.yaml (+ shell-hooks-allowlist.json).
   HERMES_HOME: z.string().default(join(homedir(), '.hermes')),
@@ -310,6 +314,8 @@ const envSchema = z.object({
   OPENCODE_PATH: z.string().optional(),
   // Path to the `pi` CLI for Pi recap one-shots (else `pi` is resolved from PATH).
   PI_PATH: z.string().optional(),
+  // Path to the `omp` CLI for Oh My Pi recap one-shots (else `omp` is resolved from PATH).
+  OMP_PATH: z.string().optional(),
   // Path to the `hermes` CLI for Hermes recap one-shots (else `hermes` is resolved from PATH).
   HERMES_PATH: z.string().optional(),
   // Path to the `commandcode` CLI for Command Code recap one-shots (else resolved from PATH).
@@ -349,6 +355,8 @@ const envSchema = z.object({
   AGY_SUMMARY_MODEL: z.string().default('gemini-3.7-flash-low'),
   // Pi recap model (`provider/model` or a model pattern). Empty → use the user's pi config default.
   PI_SUMMARY_MODEL: z.string().default(''),
+  // Oh My Pi recap model (an `omp --model` pattern). Empty → the user's omp default.
+  OMP_SUMMARY_MODEL: z.string().default(''),
   // Hermes recap model. Empty → use the user's ~/.hermes/config.yaml default (keeps their provider).
   HERMES_SUMMARY_MODEL: z.string().default(''),
   // Command Code recap model. Empty → use the user's own account default.

@@ -116,6 +116,13 @@ export const ENGINE_INSTALL: Readonly<Record<ProcessEngine, EngineInstallRecipe>
     source: 'https://docs.github.com/en/copilot/get-started/cli-quickstart',
     executable: { names: ['copilot'], npmGlobal: true, homeRelativePaths: ['.local/bin/copilot'] },
   },
+  omp: {
+    // Verbatim from the omp binary's own update path. `--binary` installs the native build into
+    // ~/.local/bin instead of a bun package.
+    command: 'curl -fsSL https://omp.sh/install | sh -s -- --binary',
+    source: 'https://github.com/can1357/oh-my-pi',
+    executable: { names: ['omp'], homeRelativePaths: ['.local/bin/omp'] },
+  },
 }
 
 /** A terminal has nothing to install — the login shell is already there — hence `undefined`. */
