@@ -41,7 +41,9 @@
     "@vitest/coverage-v8": "4.1.11",
     "concurrently": "^9.1.2",
     "esbuild": "^0.27.2",
+    "mongodb-memory-server": "^11.3.0",
     "prisma": "^5.22.0",
+    "redis-memory-server": "^0.17.1",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "vitest": "^4.0.17"

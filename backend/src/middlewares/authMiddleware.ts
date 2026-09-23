@@ -48,7 +48,11 @@ export function shouldSkipAuth(url: string): boolean {
     // The approve/deny/lookup half is NOT listed and stays SSO-gated — that is where the user's identity
     // and their machine list are involved. Listed one by one, like the cursor pair above.
     path === '/api/device-auth/start' ||
-    path === '/api/device-auth/poll'
+    path === '/api/device-auth/poll' ||
+    // Self-hosted enrollment. The handler 404s unless HARNESS_SELF_HOSTED is on, and the
+    // proof is the enrollment token or an allowlisted pubkey, not an SSO session.
+    path === '/api/self-host/challenge' ||
+    path === '/api/self-host/enroll'
   )
 }
 

@@ -127,6 +127,15 @@ const envSchema = z.object({
   // Autonomous campaign billing for NEW managed machines. A cold catalog outage still cannot expose
   // incomplete plans: the seeder retains a complete cache or falls back to Remote only.
   HARNESS_BILLING_ENABLED: z.string().default('true').transform((v) => v === 'true'),
+  // Self-hosted control plane. When true, access tokens are per-machine keys issued by
+  // /api/self-host/enroll and are never checked against Autonomous SSO. Upstream stays
+  // on SSO when this is unset.
+  HARNESS_SELF_HOSTED: z.string().default('false').transform((v) => v === 'true'),
+  // Shared bootstrap secret. Possession enrolls a machine. Optional when HARNESS_PUBKEY_ALLOWLIST
+  // names the machine's Ed25519 pubkey. Treat it like a root password.
+  HARNESS_ENROLLMENT_TOKEN: z.string().optional(),
+  // Newline-separated Ed25519 public keys (standard base64 or hex), '#' comments allowed.
+  HARNESS_PUBKEY_ALLOWLIST: z.string().optional(),
   // Ceiling on billing-free Remote machines auto-created by the device-auth grant
   // (`harness auth device`). That path is free and its computer id is self-declared, so this caps the
   // rows one account can mint; 0 disables the check. Hygiene, not a security control.
@@ -220,7 +229,18 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>
 
+function applySelfHostDefaults(): void {
+  if (process.env.HARNESS_SELF_HOSTED !== 'true') return
+  // A self-hosted box has no campaign catalog and no Cloudflare TURN key. Leave an explicit
+  // operator choice alone; otherwise don't call out and don't hand clients public STUN servers.
+  // Empty STUN keeps WebRTC on host candidates, which is what a WireGuard mesh needs.
+  if (!process.env.HARNESS_BILLING_ENABLED) process.env.HARNESS_BILLING_ENABLED = 'false'
+  if (process.env.TERMINAL_P2P_STUN_URLS == null) process.env.TERMINAL_P2P_STUN_URLS = ''
+  if (process.env.TERMINAL_P2P_TURN_KEY_ID == null) process.env.TERMINAL_P2P_TURN_KEY_ID = ''
+}
+
 function validateEnv(): Env {
+  applySelfHostDefaults()
   const parsed = envSchema.safeParse(process.env)
   if (!parsed.success) {
     console.error('Invalid environment variables:', parsed.error.flatten().fieldErrors)

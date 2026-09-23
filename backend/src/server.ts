@@ -14,6 +14,7 @@ import { deskRoutes } from './routes/desk.js'
 import { handleObserverUpgrade } from './lib/observerWs.js'
 import { deviceAuthRoutes } from './routes/deviceAuth.js'
 import { healthRoutes, authRoutes, userRoutes, machineRoutes, planRoutes, gridRoutes, deviceRoutes, mobileRoutes, appRoutes, analyticsRoutes, agentRouteRoutes, storeRoutes } from './routes/index.js'
+import { selfHostRoutes } from './routes/selfHost.js'
 import { startSubdomainProxy, startMeshProxy } from './lib/subdomainProxy.js'
 import { handleDeviceUpgrade } from './lib/deviceWs.js'
 import { handleWebUpgrade } from './lib/webWs.js'
@@ -147,6 +148,7 @@ async function start(): Promise<void> {
   registerAuthMiddleware(app)
 
   await app.register(healthRoutes)
+  await app.register(selfHostRoutes)
   await app.register(authRoutes)
   await app.register(userRoutes)
   await app.register(machineRoutes)

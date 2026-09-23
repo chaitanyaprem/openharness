@@ -181,6 +181,13 @@ export async function authenticateAccessToken(
   autonomousEnv: AutonomousEnvironment = 'prod',
   { enforceEnv = true }: { enforceEnv?: boolean } = {},
 ): Promise<AuthUser> {
+  // Self-hosted daemons present a machine api key. Do not call Autonomous SSO for it.
+  if (env.HARNESS_SELF_HOSTED) {
+    const { selfHostUserForToken } = await import('./selfHostAuth.js')
+    const user = await selfHostUserForToken(token)
+    if (!user) throw new SsoAuthError('Invalid self-hosted credential', 'INVALID_TOKEN')
+    return user
+  }
   const profile = await profileCache.resolve(token, autonomousEnv, () => fetchSsoProfile(token, autonomousEnv))
   const metadata = accessTokenMetadata(token)
   const email = normalizeUserEmail(profile.email)
