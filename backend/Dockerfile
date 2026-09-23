@@ -15,11 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -
 # mode — wrong for a container.) Global so it survives the dev prune.
 RUN npm install -g pm2
 
-# Install deps first (postinstall runs `prisma generate`, so the schema must be present).
-# Dev deps are needed to build; prune them afterwards.
+# Install deps first. Dev deps are needed to build; prune them afterwards.
+# --ignore-scripts skips dependency postinstalls that download or compile test
+# binaries (the in-memory Redis and Mongo packages). Prisma still has to generate.
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci
+RUN npm ci --ignore-scripts && npx prisma generate
 
 # Build, then drop dev dependencies for a leaner runtime image.
 COPY tsconfig.json build.mjs ./

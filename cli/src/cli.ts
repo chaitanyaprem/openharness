@@ -1841,9 +1841,9 @@ async function runForeground(session: AuthSession): Promise<void> {
   // While an attempt is running AND within its ceiling, the RPCs that need the grid name wait
   // briefly on it; otherwise they read the name directly.
   backend.gridReadyProbe = () => gridAttach.probe()
-  onBackendConnected = () => gridAttach.run()
-  // A grid is minted against the account; without one there is nothing to reconcile and every
-  // attempt would only log its own refusal.
+  // A grid is minted against the Autonomous account. Self-hosted mode has no such account, and a
+  // reconnect must not retry the sign-in either.
+  onBackendConnected = () => { if (!env.HARNESS_SELF_HOSTED) gridAttach.run() }
   if (!session.local && !env.HARNESS_SELF_HOSTED) gridAttach.run()
 
   /**
