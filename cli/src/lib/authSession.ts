@@ -1,6 +1,7 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { env } from '../config/env.js'
 
 export interface AuthSession {
   version: 1
@@ -189,6 +190,9 @@ export class AuthSessionManager {
   async accessToken(opts: { force?: boolean; failedToken?: string } = {}): Promise<string> {
     const current = readAuthSession()
     if (!current) throw new AuthSessionError('Not signed in. Run `harness login`.', 'MISSING')
+    // A self-hosted machine key does not expire and is not an SSO refresh token. Refreshing it
+    // would call the Autonomous token endpoint. The key in the session file is the credential.
+    if (env.HARNESS_SELF_HOSTED) return current.accessToken
     if (opts.failedToken && current.accessToken !== opts.failedToken) return current.accessToken
     const needsRefresh = opts.force === true || (current.expiresAt != null && current.expiresAt <= Date.now() + REFRESH_SKEW_MS)
     if (!needsRefresh) return current.accessToken

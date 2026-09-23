@@ -5,6 +5,7 @@ import { join } from 'path'
 import { z } from 'zod'
 import { parseHerdrSessions, parseTerminalBackends } from './terminalConfig.js'
 import { adoptComputerId } from '../lib/computerIdentity.js'
+import { applySelfHostEnv } from './selfHost.js'
 
 // Packaged files (cli.js/notify.mjs) live in ~/.harness/cli; mutable state in ~/.harness/cli/data.
 // `~/.harness` is the PRODUCT data root and does not move — see the naming discipline in CLAUDE.md.
@@ -265,6 +266,16 @@ const envSchema = z.object({
   // flag can never hide an account that is there. The desktop app sets it when the person chooses to
   // use this computer without an account.
   HARNESS_LOCAL_ONLY: z.string().default('false').transform((v) => v === 'true'),
+  // Self-hosted relay. Set by applySelfHostEnv() from HARNESS_SELF_HOSTED or ~/.harness/self-host.json.
+  // When true, login enrolls a machine key instead of opening SSO, and the egress switches below
+  // default on. Unset, every default in this file is the upstream one.
+  HARNESS_SELF_HOSTED: z.string().default('false').transform((v) => v === 'true'),
+  // Store catalog refresh must not fetch GitHub. Local `--link` installs still work. The bundled
+  // registry remains readable.
+  HARNESS_STORE_OFFLINE: z.string().default('false').transform((v) => v === 'true'),
+  // Bootstrap secret for POST /api/self-host/enroll. Optional when the server allowlists this
+  // machine's pubkey. Never logged.
+  HARNESS_ENROLLMENT_TOKEN: z.string().optional(),
   // Additive terminal capability. Order controls deterministic primary-route tie breaking.
   //
   // UNSET MEANS AUTO — every backend that is actually usable here, which is what makes `herdr` then an
@@ -446,6 +457,7 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>
 
 function validateEnv(): Env {
+  applySelfHostEnv()
   const parsed = envSchema.safeParse(process.env)
 
   if (!parsed.success) {

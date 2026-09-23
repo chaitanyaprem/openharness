@@ -31,6 +31,7 @@ import { createServer } from 'http'
 import { createInterface, emitKeypressEvents } from 'readline'
 import { homedir, hostname } from 'os'
 import { env } from './config/env.js'
+import { enrollSelfHosted } from './lib/selfHostEnroll.js'
 import { VERSION } from './version.js'
 import { sqlitePreflightMessage } from './lib/sqliteAvailability.js'
 import { AttachTracker } from './lib/attachTracker.js'
@@ -677,6 +678,22 @@ async function loginCommand(
   opts: { chained?: boolean; entryPoint?: string } = {},
 ): Promise<SignInOutcome> {
   if (foreground) throw new Error('`harness login` does not run the adapter. Use `harness start -f`.')
+  if (env.HARNESS_SELF_HOSTED) {
+    const emitSelf = (line: Record<string, unknown>): void => { if (json) console.log(JSON.stringify(line)) }
+    try {
+      await enrollSelfHosted({ force })
+      await resolveComputerMachine()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (json) emitSelf({ type: 'result', status: 'error', code: 'ENROLL_FAILED', message })
+      else console.error(`\n  ✗ ${message}\n`)
+      process.exitCode = 1
+      return { signedIn: false }
+    }
+    if (json) emitSelf({ type: 'result', status: 'success', selfHosted: true })
+    else console.log('\n  ✓ Enrolled with the self-hosted relay. Run `harness start` to connect this computer.\n')
+    return { signedIn: true, alreadySignedIn: false }
+  }
   // Which surface asked to sign in. A person in a terminal is `cli`; the desktop app runs this same
   // command and says so with `--entry-point=desktop`. Analytics only — it names no privilege.
   const entryPoint = opts.entryPoint ?? 'cli'
@@ -1011,6 +1028,12 @@ function openInBrowser(url: string): void {
 /** Start the adapter from a saved SSO session — or, with HARNESS_LOCAL_ONLY, from this computer's own
  *  id and no account at all. Missing credentials never open a browser implicitly. */
 async function startCommand(foreground: boolean, repair: boolean = false): Promise<void> {
+  if (env.HARNESS_SELF_HOSTED && !readAuthSession()) {
+    try { await enrollSelfHosted() } catch (err) {
+      console.error(`\n  ✗ ${err instanceof Error ? err.message : String(err)}\n`)
+      process.exit(1)
+    }
+  }
   const session = daemonSession()
   if (!session) {
     console.error('\n  ✗ Not signed in. Run: harness login\n')
@@ -1264,7 +1287,7 @@ async function runForeground(session: AuthSession): Promise<void> {
   // net under the promise itself. The promise is kept so the grid reconcile below can wait for the
   // pinned binary before it hands a token over.
   // Nothing to attach a grid to without an account, so local mode neither downloads nor pins one.
-  const managedGridReady: Promise<string | null> = session.local
+  const managedGridReady: Promise<string | null> = session.local || env.HARNESS_SELF_HOSTED
     ? Promise.resolve(null)
     : ensureManagedGrid((m) => console.log(`[grid-runtime] ${m}`))
   void managedGridReady
@@ -1821,7 +1844,7 @@ async function runForeground(session: AuthSession): Promise<void> {
   onBackendConnected = () => gridAttach.run()
   // A grid is minted against the account; without one there is nothing to reconcile and every
   // attempt would only log its own refusal.
-  if (!session.local) gridAttach.run()
+  if (!session.local && !env.HARNESS_SELF_HOSTED) gridAttach.run()
 
   /**
    * Is ANY device surface watching this machine?
@@ -5733,6 +5756,9 @@ const launchDeps = defaultLaunchDeps(LOG_FILE, daemonPort())
  * terminal — once is enough, so the grid step is skipped there.
  */
 async function repairManagedRuntimes(foreground: boolean): Promise<string | null> {
+  // Self-hosted machines use the Node and tmux the operator installed. The managed
+  // archives are fetched from storage.googleapis.com.
+  if (env.HARNESS_SELF_HOSTED) return null
   const repaired = await ensureManagedRuntime((m) => console.log(m))
   if (repaired) ensureLauncher(repaired, (m) => console.log(m))
   if (!foreground) await ensureManagedGrid((m) => console.log(m))

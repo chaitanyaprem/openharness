@@ -83,6 +83,9 @@ export class LiveStoreCatalog {
   current(): DshRegistryEntry[] { return this.cache?.catalog.entries ?? this.options.fallback() }
 
   refresh(force = false): Promise<DshRegistryEntry[]> {
+    // Self-hosted mode serves the bundled registry and anything already on disk. A refresh must
+    // not open a connection to GitHub.
+    if (env.HARNESS_STORE_OFFLINE) return Promise.resolve(this.current())
     if (this.inFlight) return this.inFlight
     if (!force && this.now() < this.nextAttempt) return Promise.resolve(this.current())
     this.inFlight = this.update().finally(() => { this.inFlight = null })
