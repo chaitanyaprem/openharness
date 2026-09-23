@@ -16,6 +16,15 @@ export function backendHttpBase(): string {
   return env.BACKEND_WS_URL.replace(/\/$/, '').replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
 }
 
+/** The relay answered, and said no. `status` is its HTTP status: 403 means this computer is not
+ *  allowed to enroll at all (no valid token, key not on the allowlist). */
+export class SelfHostEnrollError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'SelfHostEnrollError'
+  }
+}
+
 export function enrollMessage(nonce: string, computerId: string, pubkey: string): Uint8Array {
   return new TextEncoder().encode(`harness-self-host-enroll\n${nonce}\n${computerId}\n${pubkey}`)
 }
@@ -33,7 +42,7 @@ export async function enrollSelfHosted(opts: { force?: boolean; fetchImpl?: type
   const pubkey = b64e(identity.pub)
   const challengeRes = await fetchImpl(`${base}/api/self-host/challenge`)
   if (!challengeRes.ok) {
-    throw new Error(`self-hosted relay refused a challenge (${challengeRes.status}). Is HARNESS_SELF_HOSTED set on the backend?`)
+    throw new SelfHostEnrollError(`self-hosted relay refused a challenge (${challengeRes.status}). Is HARNESS_SELF_HOSTED set on the backend?`, challengeRes.status)
   }
   const challenge = await challengeRes.json() as { data?: { nonce?: string } }
   const nonce = challenge.data?.nonce
@@ -54,7 +63,7 @@ export async function enrollSelfHosted(opts: { force?: boolean; fetchImpl?: type
   const body = await res.json().catch(() => null) as { success?: boolean; data?: { accessToken?: string; machineId?: string }; error?: { message?: string } } | null
   if (!res.ok || !body?.success || !body.data?.accessToken || !body.data.machineId) {
     const message = body?.error?.message || `enrollment failed (${res.status})`
-    throw new Error(message)
+    throw new SelfHostEnrollError(message, res.status)
   }
   const session: AuthSession = {
     version: 1,

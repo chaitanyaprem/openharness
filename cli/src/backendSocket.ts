@@ -883,11 +883,20 @@ export class BackendSocket {
       if (/Unexpected server response: 401\b/.test(msg) && !this.retryingAuth) {
         this.retryingAuth = true
         void this.auth.accessToken({ force: true, failedToken: token })
-          .then(() => {
+          .then((next) => {
             this.retryingAuth = false
             // onGone has normally run by now (the close lands long before a network round trip
             // returns); if this socket is somehow still ours, let go of it before dialing again.
             if (this.ws === ws) { this.ws = null; try { ws.terminate() } catch { /* ignore */ } }
+            if (this.closed) return
+            // The "refresh" handed back the token that was just refused. Dialing again at once would
+            // only be refused again, in a loop with no delay, so take the ordinary backoff instead.
+            if (next === token) {
+              const delay = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** Math.min(this.attempts++, 5))
+              console.log(`[backend] the refreshed token is the refused one — retrying in ${Math.round(delay / 1000)}s (attempt ${this.attempts})`)
+              setTimeout(() => this.connect(), delay)
+              return
+            }
             this.connect()
           })
           .catch((error: unknown) => {

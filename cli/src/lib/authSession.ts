@@ -206,9 +206,9 @@ export class AuthSessionManager {
   async accessToken(opts: { force?: boolean; failedToken?: string } = {}): Promise<string> {
     const current = readAuthSession()
     if (!current) throw new AuthSessionError('Not signed in. Run `harness login`.', 'MISSING')
-    // A self-hosted machine key does not expire and is not an SSO refresh token. Refreshing it
-    // would call the Autonomous token endpoint. The key in the session file is the credential.
-    if (env.HARNESS_SELF_HOSTED) return current.accessToken
+    // A self-hosted token does not expire and has no SSO refresh token; refreshing it would call the
+    // Autonomous token endpoint. It is replaced only when the relay refuses it, by enrolling again.
+    if (env.HARNESS_SELF_HOSTED) return this.selfHostedToken(current, opts)
     if (opts.failedToken && current.accessToken !== opts.failedToken) return current.accessToken
     const needsRefresh = opts.force === true || (current.expiresAt != null && current.expiresAt <= Date.now() + REFRESH_SKEW_MS)
     if (!needsRefresh) return current.accessToken
@@ -233,6 +233,39 @@ export class AuthSessionManager {
       } catch (err) {
         if (err instanceof AuthSessionError && err.code === 'INVALID_REFRESH') clearAuthSession()
         throw err
+      }
+    })
+    this.refreshInFlight = running
+    try { return await running } finally { if (this.refreshInFlight === running) this.refreshInFlight = null }
+  }
+
+  /**
+   * The relay refused the token (the operator rotated it). Enroll again and use whatever token the
+   * relay hands out now. A relay that refuses the enrollment too (403: no valid enrollment token, key
+   * not on the allowlist) has ended this computer's session, which callers already treat as a
+   * sign-out. Anything else, a relay that is down included, is transient and keeps the session.
+   */
+  private async selfHostedToken(current: AuthSession, opts: { force?: boolean; failedToken?: string }): Promise<string> {
+    if (opts.failedToken && current.accessToken !== opts.failedToken) return current.accessToken
+    if (!opts.force && !opts.failedToken) return current.accessToken
+    if (this.refreshInFlight) return this.refreshInFlight
+    const running = withLock(async () => {
+      const latest = readAuthSession()
+      if (!latest) throw new AuthSessionError('Not signed in. Run `harness login`.', 'MISSING')
+      if (opts.failedToken && latest.accessToken !== opts.failedToken) return latest.accessToken
+      // Imported here: selfHostEnroll imports this module for the session file.
+      const { enrollSelfHosted, SelfHostEnrollError } = await import('./selfHostEnroll.js')
+      try {
+        return (await enrollSelfHosted({ force: true })).accessToken
+      } catch (err) {
+        if (err instanceof SelfHostEnrollError && err.status === 403) {
+          clearAuthSession()
+          throw new AuthSessionError(
+            `The self-hosted relay no longer lets this computer enroll (${err.message}). Run \`harness login\` with a valid enrollment token.`,
+            'INVALID_REFRESH',
+          )
+        }
+        throw new AuthSessionError(`Could not enroll with the self-hosted relay: ${err instanceof Error ? err.message : String(err)}`, 'UNAVAILABLE')
       }
     })
     this.refreshInFlight = running

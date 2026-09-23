@@ -329,6 +329,22 @@ describe('BackendSocket outbound queue', () => {
       await socket.stop()
     })
 
+    it('backs off instead of redialing when the refresh returns the refused token', async () => {
+      vi.useFakeTimers()
+      const { auth, calls } = authStub(async () => 'stale-token')
+      const socket = new BackendSocket('0123456789abcdef0123456789abcdef', auth)
+      socket.connect()
+      await vi.advanceTimersByTimeAsync(0)
+      wsMock.instances[0].open()
+      wsMock.instances[0].refused(401)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls).toHaveLength(1)
+      expect(wsMock.instances).toHaveLength(1) // no immediate redial with the same token
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(wsMock.instances).toHaveLength(2) // the ordinary backoff
+      await socket.stop()
+    })
+
     it('signs out only when the refresh token itself is rejected', async () => {
       vi.useFakeTimers()
       const { auth } = authStub(async () => { throw new AuthSessionError('refresh token is invalid', 'INVALID_REFRESH') })
